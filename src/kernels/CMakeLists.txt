@@ -33,3 +33,4 @@ add_subdirectory(bench)
 add_subdirectory(playground)
 add_subdirectory(triton)
 
+add_subdirectory(flash_kernel)
