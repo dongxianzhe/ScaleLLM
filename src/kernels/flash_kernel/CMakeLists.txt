@@ -39,3 +39,13 @@ cc_binary(
   DEPS
     torch
 )
+
+cc_binary(
+  NAME
+    test_cute_layout
+  SRCS
+    test_cute_layout.cu
+  DEPS
+    torch
+    
+)
