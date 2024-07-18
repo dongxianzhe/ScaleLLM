@@ -1,7 +1,12 @@
-#include<include/cute>
+#include<cute/layout.hpp>
+#include <cute/tensor.hpp>
 
-int main(){
-    Layout s2xd4_row = make_layout(make_shape(Int<2>{}, 4), LayoutRight{});  
-    cute::print(s2xd4_row);
-    return 0;
+using namespace cute;
+
+int main()
+{
+  using MMA = MMA_Traits<SM80_16x8x8_F32F16F16F32_TN>;
+  print("ALayout: "); print(typename MMA::ALayout{}); print("\n");
+  print("BLayout: "); print(typename MMA::BLayout{}); print("\n");
+  print("CLayout: "); print(typename MMA::CLayout{}); print("\n");
 }
