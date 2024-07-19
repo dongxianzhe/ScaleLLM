@@ -44,7 +44,7 @@ torch::Tensor cute_sgemm_naive(torch::Tensor A, torch::Tensor B){
     const int K = A.size(1);
     const int N = B.size(1);
 
-    auto C = torch::empty_like(A, A.options());
+    torch::Tensor C = torch::empty({M, N}, torch::dtype(torch::kFloat32).device(torch::kCUDA));
     dim3 gridDim(M / BLOCK_SIZE_M, N / BLOCK_SIZE_N);
     dim3 blockDim(BLOCK_SIZE_M, BLOCK_SIZE_N);
 
@@ -68,17 +68,17 @@ __global__ void cute_mma_gemm_simple_kernel(T* Cptr, const T* Aptr, const T* Bpt
   Tensor A = make_tensor(make_gmem_ptr(Aptr), make_shape(m, k), make_stride(k, Int<1>{}));
   Tensor B = make_tensor(make_gmem_ptr(Bptr), make_shape(n, k), make_stride(k, Int<1>{}));
   Tensor C = make_tensor(make_gmem_ptr(Cptr), make_shape(m, n), make_stride(n, Int<1>{}));
-  debug_tensor(A);
-  debug_tensor(B);
-  debug_tensor(C);
+  // debug_tensor(A);
+  // debug_tensor(B);
+  // debug_tensor(C);
   int ix = blockIdx.x;
   int iy = blockIdx.y;
   Tensor gA = local_tile(A, make_tile(Int<kTileM>{}, Int<kTileK>{}), make_coord(iy, _));
   Tensor gB = local_tile(B, make_tile(Int<kTileN>{}, Int<kTileK>{}), make_coord(ix, _));
   Tensor gC = local_tile(C, make_tile(Int<kTileM>{}, Int<kTileN>{}), make_coord(iy, ix));
-  debug_tensor(gA);
-  debug_tensor(gB);
-  debug_tensor(gC);
+  // debug_tensor(gA);
+  // debug_tensor(gB);
+  // debug_tensor(gC);
 
   TiledMMA tiled_mma;
   ThrMMA thr_mma = tiled_mma.get_thread_slice(threadIdx.x);
@@ -89,15 +89,15 @@ __global__ void cute_mma_gemm_simple_kernel(T* Cptr, const T* Aptr, const T* Bpt
   auto tBrB = thr_mma.partition_fragment_B(gB(_, _, 0));  // (MMA, MMA_K, MMA_N)
   auto tCrC = thr_mma.partition_fragment_C(gC(_, _));     // (MMA, MMA_M, MMA_N)
   clear(tCrC);
-  debug_tensor(tAgA);
-  debug_tensor(tBgB);
-  debug_tensor(tCgC);
-  debug_tensor(tArA);
-  debug_tensor(tBrB);
-  debug_tensor(tCrC);
+  // debug_tensor(tAgA);
+  // debug_tensor(tBgB);
+  // debug_tensor(tCgC);
+  // debug_tensor(tArA);
+  // debug_tensor(tBrB);
+  // debug_tensor(tCrC);
 
   int num_tile_k = size<2>(gA);
-  if(thread0())printf("num_tile_k = %d\n", num_tile_k);
+  // if(thread0())printf("num_tile_k = %d\n", num_tile_k);
 #pragma unroll 1
   for(int itile = 0; itile < num_tile_k; itile ++){
     cute::copy(tAgA(_, _, _, itile), tArA);
@@ -109,10 +109,11 @@ __global__ void cute_mma_gemm_simple_kernel(T* Cptr, const T* Aptr, const T* Bpt
   cute::copy(tCrC, tCgC);
 }
 
-
 torch::Tensor cute_mma_gemm_simple(torch::Tensor A, torch::Tensor B){
-  int M = A.size(0), N = B.size(1), K = A.size(1);
-  torch::Tensor B_Kmajor = B.transpose(0, 1);
+  torch::Tensor B_Kmajor = B.transpose(0, 1).contiguous();
+  const int M = A.size(0);
+  const int K = A.size(1);
+  const int N = B_Kmajor.size(0);
   using namespace cute;
 
   const int BLOCK_SIZE_M = 128;
@@ -126,14 +127,14 @@ torch::Tensor cute_mma_gemm_simple(torch::Tensor A, torch::Tensor B){
       make_layout(Shape<_2, _2, _1>{})
       // make_layout(Shape<_4, _1, _1>{})
     ));
-  printf("TiledMMA:"); print(TiledMMA{}); printf("\n");
+  // printf("TiledMMA:"); print(TiledMMA{}); printf("\n");
 
   torch::Tensor C = torch::empty({M, N}, torch::TensorOptions().dtype(torch::kHalf).device(torch::kCUDA));
 
   dim3 gridDim(N / BLOCK_SIZE_N, M / BLOCK_SIZE_M);
   dim3 blockDim(size(TiledMMA{}));
-  std::cout << "gridDim:" << gridDim << std::endl;
-  std::cout << "blockDim:" << blockDim << std::endl;
+  // std::cout << "gridDim:" << gridDim << std::endl;
+  // std::cout << "blockDim:" << blockDim << std::endl;
 
   using T = half;
   cute_mma_gemm_simple_kernel<T, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K, TiledMMA><<<gridDim, blockDim>>>(

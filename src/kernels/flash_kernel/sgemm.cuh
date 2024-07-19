@@ -26,7 +26,7 @@ torch::Tensor sgemm_naive(torch::Tensor A, torch::Tensor B){
     const int K = A.size(1);
     const int N = B.size(1);
 
-    auto C = torch::empty_like(A, A.options());
+    torch::Tensor C = torch::empty({M, N}, torch::dtype(torch::kFloat32).device(torch::kCUDA));
 
     DISPATCH_PYTORCH_DTYPE_TO_CTYPE(A.scalar_type(), c_type, [&]{
         const int BLOCK_SIZE_M = 8;
@@ -82,7 +82,7 @@ torch::Tensor sgemm_smem(torch::Tensor A, torch::Tensor B){
     const int K = A.size(1);
     const int N = B.size(1);
 
-    auto C = torch::empty_like(A, A.options());
+    torch::Tensor C = torch::empty({M, N}, torch::dtype(torch::kFloat32).device(torch::kCUDA));
 
     DISPATCH_PYTORCH_DTYPE_TO_CTYPE(A.scalar_type(), c_type, [&]{
         const int BLOCK_SIZE_K = 8;
@@ -189,7 +189,7 @@ torch::Tensor sgemm_smem_reg(torch::Tensor A, torch::Tensor B){
     const int K = A.size(1);
     const int N = B.size(1);
 
-    auto C = torch::empty_like(A, A.options());
+    torch::Tensor C = torch::empty({M, N}, torch::dtype(torch::kFloat32).device(torch::kCUDA));
 
     DISPATCH_PYTORCH_DTYPE_TO_CTYPE(A.scalar_type(), c_type, [&]{
         const int BLOCK_SIZE_M = 128;
@@ -298,7 +298,7 @@ torch::Tensor sgemm_smem_reg_coalesce(torch::Tensor A, torch::Tensor B){
     const int K = A.size(1);
     const int N = B.size(1);
 
-    auto C = torch::empty_like(A, A.options());
+    torch::Tensor C = torch::empty({M, N}, torch::dtype(torch::kFloat32).device(torch::kCUDA));
 
     DISPATCH_PYTORCH_DTYPE_TO_CTYPE(A.scalar_type(), c_type, [&]{
         const int BLOCK_SIZE_M = 128;
@@ -440,7 +440,7 @@ torch::Tensor sgemm_smem_reg_coalesce_pg2s(torch::Tensor A, torch::Tensor B){
     const int K = A.size(1);
     const int N = B.size(1);
 
-    auto C = torch::empty_like(A, A.options());
+    torch::Tensor C = torch::empty({M, N}, torch::dtype(torch::kFloat32).device(torch::kCUDA));
 
     DISPATCH_PYTORCH_DTYPE_TO_CTYPE(A.scalar_type(), c_type, [&]{
         const int BLOCK_SIZE_M = 128;
@@ -614,7 +614,7 @@ torch::Tensor sgemm_smem_reg_coalesce_pg2s_ps2r(torch::Tensor A, torch::Tensor B
     const int K = A.size(1);
     const int N = B.size(1);
 
-    auto C = torch::empty_like(A, A.options());
+    torch::Tensor C = torch::empty({M, N}, torch::dtype(torch::kFloat32).device(torch::kCUDA));
 
     DISPATCH_PYTORCH_DTYPE_TO_CTYPE(A.scalar_type(), c_type, [&]{
         const int BLOCK_SIZE_M = 128;

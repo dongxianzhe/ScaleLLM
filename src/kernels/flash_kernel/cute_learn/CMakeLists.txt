@@ -19,3 +19,13 @@ cc_binary(
     torch
     cutlass
 )
+
+cc_binary(
+  NAME
+    test_cute_gemm
+  SRCS
+    test_cute_gemm.cu
+  DEPS
+    torch
+    cutlass
+)
