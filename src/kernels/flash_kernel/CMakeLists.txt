@@ -25,7 +25,10 @@ cc_binary(
     test_gemm
   SRCS
     sgemm.cuh
+    gemm_cute.cuh
     test_gemm.cu
+  COPTS
+    -lineinfo
   DEPS
     torch
     cutlass
@@ -69,6 +72,13 @@ cc_binary(
     torch
 )
 
-
+cc_binary(
+  NAME
+    test_transpose
+  SRCS
+    test_transpose.cu
+  DEPS
+    torch
+)
 
 add_subdirectory(cute_learn)
