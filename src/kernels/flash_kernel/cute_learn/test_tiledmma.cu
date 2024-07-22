@@ -39,8 +39,8 @@ int main(){
     using mma_atom = MMA_Atom<mma_traits>;
     using TiledMMA = decltype(
         make_tiled_mma(mma_atom{},
-        make_layout(Shape<_2, _2, _1>{})
-        // make_layout(Shape<_4, _1, _1>{})
+        make_layout(Shape<_2, _2, _1>{}), 
+        make_layout(Shape<_4, _1, _1>{})
         ));
     printf("TiledMMA:"); print(TiledMMA{}); printf("\n");
     
@@ -70,7 +70,7 @@ int main(){
 
     puts("---------- fragment --------------------");
     TiledMMA tiled_mma;
-    ThrMMA thr_mma = tiled_mma.get_thread_slice(0);
+    ThrMMA thr_mma = tiled_mma.get_thread_slice(32);
     Tensor tAgA = thr_mma.partition_A(gA); // (MMA, MMA_M, MMA_K, num_tile_k)
     auto tArA = thr_mma.partition_fragment_A(gA(_, _, 0));  // (MMA, MMA_M, MMA_K)
     debug_tensor(tAgA);

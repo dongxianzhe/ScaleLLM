@@ -4,9 +4,9 @@
 #include<cute/stride.hpp>
 #include<cute/tensor.hpp>
 
-const int M = 1024;
-const int N = 1024;
-const int K = 256;
+const int M = 32;
+const int N = 16;
+const int K = 16;
 const int kTileM = 32;
 const int kTileN = 16; 
 const int kTileK = 16;
@@ -84,7 +84,6 @@ __global__ void cute_mma_gemm_simple_kernel(T* Cptr, const T* Aptr, const T* Bpt
   for(int itile = 0; itile < num_tile_k; itile ++){
     cute::copy(tAgA(_, _, _, itile), tArA);
     cute::copy(tBgB(_, _, _, itile), tBrB);
-
     cute::gemm(tiled_mma, tCrC, tArA, tBrB, tCrC);
   }
 
@@ -123,7 +122,6 @@ torch::Tensor gemm_simple(torch::Tensor A, torch::Tensor B){
 int main(){
     torch::Tensor A = torch::randn({M, K}, torch::dtype(torch::kHalf).device(torch::kCUDA));
     torch::Tensor B = torch::randn({K, N}, torch::dtype(torch::kHalf).device(torch::kCUDA));
-    // torch::Tensor C_ref = A.matmul(B.transpose(0, 1));
     torch::Tensor C_ref = A.matmul(B);
 
     torch::Tensor C = gemm_simple(A, B.transpose(0, 1).contiguous());
