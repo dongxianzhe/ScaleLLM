@@ -81,4 +81,14 @@ cc_binary(
     torch
 )
 
+cc_binary(
+  NAME
+    test_empty_kernel
+  SRCS
+    test_empty_kernel.cu
+)
+
 add_subdirectory(cute_learn)
+add_subdirectory(cpp_learn)
+add_subdirectory(gemm)
+add_subdirectory(copy)

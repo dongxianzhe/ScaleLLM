@@ -29,3 +29,52 @@ cc_binary(
     torch
     cutlass
 )
+
+cc_binary(
+  NAME
+    test_swizzle
+  SRCS
+    test_swizzle.cu
+  DEPS
+    torch
+    cutlass
+)
+
+cc_binary(
+  NAME
+    test_cute_copy
+  SRCS
+    test_cute_copy.cu
+  DEPS
+    torch
+    cutlass
+)
+
+cc_binary(
+  NAME
+    test_cp_async
+  SRCS
+    test_cp_async.cu
+  DEPS
+    torch
+    cutlass
+)
+
+cc_binary(
+  NAME
+    test_zip_divide
+  SRCS
+    test_zip_divide.cu
+  DEPS
+    cutlass
+)
+
+cc_binary(
+  NAME
+    test_cute_gemm_algorithm
+  SRCS
+    test_cute_gemm_algorithm.cu
+  DEPS
+    torch
+    cutlass
+)
