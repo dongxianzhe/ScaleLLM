@@ -313,6 +313,7 @@ cute_gemm_multi_stage_kernel(void *Dptr, const void *Aptr, const void *Bptr, int
   auto tCrB = thr_mma.partition_fragment_B(gB(_, _, 0));  // (MMA, MMA_N, MMA_K)
   auto tCrD = thr_mma.partition_fragment_C(gD);           // (MMA, MMA_M, MMA_N)
 
+
   // fill zero for accumulator
   clear(tCrD);
 
@@ -338,6 +339,38 @@ cute_gemm_multi_stage_kernel(void *Dptr, const void *Aptr, const void *Bptr, int
   auto tBgB_copy = g2s_thr_copy_b.partition_S(gB);  // (CPY, CPY_N, CPY_K, k)
   auto tBsB_copy =
       g2s_thr_copy_b.partition_D(sB);  // (CPY, CPY_N, CPY_K, kStage)
+
+  if(thread0()){
+    printf("A :");print(A);printf("\n");
+    printf("B :");print(B);printf("\n");
+    printf("D :");print(D);printf("\n");
+    printf("gA :");print(gA);printf("\n");
+    printf("gB :");print(gB);printf("\n");
+    printf("gD :");print(gD);printf("\n");
+    printf("sA :");print(sA);printf("\n");
+    printf("sB :");print(sB);printf("\n");
+    printf("tiled_mma :");print(tiled_mma);printf("\n");
+    printf("thrmma :");print(thr_mma);printf("\n");
+    printf("tCrA :");print(tCrA);printf("\n");
+    printf("tCrB :");print(tCrB);printf("\n");
+    printf("tCrD :");print(tCrD);printf("\n");
+    printf("s2r_tiled_copy_a:");print(s2r_tiled_copy_a);printf("\n");
+    printf("s2r_thr_copy_a:");  print(s2r_thr_copy_a);printf("\n");
+    printf("tAsA:");            print(tAsA);printf("\n");
+    printf("tCrA_view:");       print(tCrA_view);printf("\n");
+    printf("s2r_tiled_copy_b:");print(s2r_tiled_copy_b);printf("\n");
+    printf("s2r_thr_copy_b:");  print(s2r_thr_copy_b);printf("\n");
+    printf("tBsB:");            print(tBsB);printf("\n");
+    printf("tCrB_view:");       print(tCrB_view);printf("\n");
+    printf("g2s_tiled_copy_a: ");print(g2s_tiled_copy_a);printf("\n");
+    printf("g2s_thr_copy_a: ");  print(g2s_thr_copy_a);printf("\n");
+    printf("tAgA_copy: ");       print(tAgA_copy);printf("\n");
+    printf("tAsA_copy: ");       print(tAsA_copy);printf("\n");
+    printf("g2s_tiled_copy_b: ");print(g2s_tiled_copy_b);printf("\n");
+    printf("g2s_thr_copy_b: ");  print(g2s_thr_copy_b);printf("\n");
+    printf("tBgB_copy: ");       print(tBgB_copy);printf("\n");
+    printf("tBsB_copy: ");       print(tBsB_copy);printf("\n");
+  }
 
   int itile_to_read = 0;
   int ismem_read = 0;

@@ -97,6 +97,7 @@ int main(){
         for(int i = 0;i < 8;i ++){
             printf("local_partition %d", i);print_tensor(local_partition(A, make_layout(make_shape(4, 8), make_stride(8, 1)), i));
         }
+        // printf("local_partition larger: ");print_tensor(local_partition(A, make_layout(make_shape(4, 64), make_stride(64, 1)), 0));
     }
     puts("------------------------------");
     return 0;
