@@ -1,0 +1,129 @@
+A :gmem_ptr[16b](0x7eb60e800000) o (1024,256):(256,_1)
+B :gmem_ptr[16b](0x7eb60e900000) o (1024,256):(256,_1)
+D :gmem_ptr[16b](0x7eb607e00000) o (1024,1024):(1024,_1)
+gA :gmem_ptr[16b](0x7eb60e800000) o (_128,_32,8):(256,_1,_32)
+gB :gmem_ptr[16b](0x7eb60e900000) o (_128,_32,8):(256,_1,_32)
+gD :gmem_ptr[16b](0x7eb607e00000) o (_128,_128):(1024,_1)
+sA :smem_ptr[16b](0x7eb631000000) o Sw<3,3,3> o _0 o (_128,_32,_3):(_32,_1,_4096)
+sB :smem_ptr[16b](0x7eb631006000) o Sw<3,3,3> o _0 o (_128,_32,_3):(_32,_1,_4096)
+tiled_mma :TiledMMA
+  ThrLayoutVMNK:  (_32,_2,_2,_1):(_1,_32,_64,_0)
+  PermutationMNK: (_32,_32,_16)
+MMA_Atom
+  ThrID:      _32:_1
+  Shape_MNK:  (_16,_8,_16)
+  LayoutA_TV: ((_4,_8),(_2,_2,_2)):((_32,_1),(_16,_8,_128))
+  LayoutB_TV: ((_4,_8),(_2,_2)):((_16,_1),(_8,_64))
+  LayoutC_TV: ((_4,_8),(_2,_2)):((_32,_1),(_16,_8))
+
+thrmma :ThrMMA
+  Thr VMNK: (0,0,0,_0)
+TiledMMA
+  ThrLayoutVMNK:  (_32,_2,_2,_1):(_1,_32,_64,_0)
+  PermutationMNK: (_32,_32,_16)
+MMA_Atom
+  ThrID:      _32:_1
+  Shape_MNK:  (_16,_8,_16)
+  LayoutA_TV: ((_4,_8),(_2,_2,_2)):((_32,_1),(_16,_8,_128))
+  LayoutB_TV: ((_4,_8),(_2,_2)):((_16,_1),(_8,_64))
+  LayoutC_TV: ((_4,_8),(_2,_2)):((_32,_1),(_16,_8))
+
+tCrA :ptr[16b](0x7eb62ffffa70) o ((_2,_2,_2),_4,_2):((_1,_2,_4),_16,_8)
+tCrB :ptr[16b](0x7eb62ffffaf0) o ((_2,_2),(_2,_4),_2):((_1,_2),(_8,_16),_4)
+tCrD :ptr[16b](0x7eb62ffffb70) o ((_2,_2),_4,_8):((_1,_2),_4,_16)
+s2r_tiled_copy_a:TiledCopy
+  Tiler_MN:       (_32,_16)
+  TiledLayout_TV: ((_4,_8,_2,_2),((_2,_2,_2),(_1,_1))):((_64,_1,_16,_0),((_32,_8,_256),(_0,_0)))
+Copy_Atom
+  ThrID:        _32:_1
+  ValLayoutSrc: (_32,_8):(_8,_1)
+  ValLayoutDst: (_32,(_2,_4)):(_2,(_1,_64))
+  ValLayoutRef: (_32,(_2,_4)):(_2,(_1,_64))
+  ValueType:    16b
+
+s2r_thr_copy_a:ThrCopy
+  ThrIdx: 0
+TiledCopy
+  Tiler_MN:       (_32,_16)
+  TiledLayout_TV: ((_4,_8,_2,_2),((_2,_2,_2),(_1,_1))):((_64,_1,_16,_0),((_32,_8,_256),(_0,_0)))
+Copy_Atom
+  ThrID:        _32:_1
+  ValLayoutSrc: (_32,_8):(_8,_1)
+  ValLayoutDst: (_32,(_2,_4)):(_2,(_1,_64))
+  ValLayoutRef: (_32,(_2,_4)):(_2,(_1,_64))
+  ValueType:    16b
+
+tAsA:smem_ptr[16b](0x7eb631000000) o ((_8,_1),_4,_2,_3):((_1,_0),_1024,16,_4096)
+tCrA_view:ptr[16b](0x7eb62ffffa70) o ((_8,_1),_4,_2):((_1,_0),_16,_8)
+s2r_tiled_copy_b:TiledCopy
+  Tiler_MN:       (_32,_16)
+  TiledLayout_TV: ((_4,_8,_2,_2),((_2,_2),(_2,_1))):((_64,_1,_0,_8),((_32,_256),(_16,_0)))
+Copy_Atom
+  ThrID:        _32:_1
+  ValLayoutSrc: (_32,_8):(_8,_1)
+  ValLayoutDst: (_32,(_2,_4)):(_2,(_1,_64))
+  ValLayoutRef: (_32,(_2,_4)):(_2,(_1,_64))
+  ValueType:    16b
+
+s2r_thr_copy_b:ThrCopy
+  ThrIdx: 0
+TiledCopy
+  Tiler_MN:       (_32,_16)
+  TiledLayout_TV: ((_4,_8,_2,_2),((_2,_2),(_2,_1))):((_64,_1,_0,_8),((_32,_256),(_16,_0)))
+Copy_Atom
+  ThrID:        _32:_1
+  ValLayoutSrc: (_32,_8):(_8,_1)
+  ValLayoutDst: (_32,(_2,_4)):(_2,(_1,_64))
+  ValLayoutRef: (_32,(_2,_4)):(_2,(_1,_64))
+  ValueType:    16b
+
+tBsB:smem_ptr[16b](0x7eb631006000) o ((_8,_1),_4,_2,_3):((_1,_0),_1024,16,_4096)
+tCrB_view:ptr[16b](0x7eb62ffffaf0) o (((_4,_2),_1),_4,_2):(((_1,_8),_0),_16,_4)
+g2s_tiled_copy_a: TiledCopy
+  Tiler_MN:       (_32,_32)
+  TiledLayout_TV: ((_4,_32),_8):((_256,_1),_32)
+Copy_Atom
+  ThrID:        _1:_0
+  ValLayoutSrc: (_1,_8):(_0,_1)
+  ValLayoutDst: (_1,_8):(_0,_1)
+  ValLayoutRef: (_1,_8):(_0,_1)
+  ValueType:    16b
+
+g2s_thr_copy_a: ThrCopy
+  ThrIdx: 0
+TiledCopy
+  Tiler_MN:       (_32,_32)
+  TiledLayout_TV: ((_4,_32),_8):((_256,_1),_32)
+Copy_Atom
+  ThrID:        _1:_0
+  ValLayoutSrc: (_1,_8):(_0,_1)
+  ValLayoutDst: (_1,_8):(_0,_1)
+  ValLayoutRef: (_1,_8):(_0,_1)
+  ValueType:    16b
+
+tAgA_copy: gmem_ptr[16b](0x7eb60e800000) o ((_8,_1),_4,_1,8):((_1,_0),8192,_0,_32)
+tAsA_copy: smem_ptr[16b](0x7eb631000000) o ((_8,_1),_4,_1,_3):((_1,_0),_1024,_0,_4096)
+g2s_tiled_copy_b: TiledCopy
+  Tiler_MN:       (_32,_32)
+  TiledLayout_TV: ((_4,_32),_8):((_256,_1),_32)
+Copy_Atom
+  ThrID:        _1:_0
+  ValLayoutSrc: (_1,_8):(_0,_1)
+  ValLayoutDst: (_1,_8):(_0,_1)
+  ValLayoutRef: (_1,_8):(_0,_1)
+  ValueType:    16b
+
+g2s_thr_copy_b: ThrCopy
+  ThrIdx: 0
+TiledCopy
+  Tiler_MN:       (_32,_32)
+  TiledLayout_TV: ((_4,_32),_8):((_256,_1),_32)
+Copy_Atom
+  ThrID:        _1:_0
+  ValLayoutSrc: (_1,_8):(_0,_1)
+  ValLayoutDst: (_1,_8):(_0,_1)
+  ValLayoutRef: (_1,_8):(_0,_1)
+  ValueType:    16b
+
+tBgB_copy: gmem_ptr[16b](0x7eb60e900000) o ((_8,_1),_4,_1,8):((_1,_0),8192,_0,_32)
+tBsB_copy: smem_ptr[16b](0x7eb631006000) o ((_8,_1),_4,_1,_3):((_1,_0),_1024,_0,_4096)
