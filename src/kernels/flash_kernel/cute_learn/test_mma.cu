@@ -17,7 +17,6 @@ void test(torch::Tensor a, torch::Tensor b, std::string name){
 
 namespace gemm_config {
   using namespace cute;
-  using T = half;
 
   // tile configuration
   constexpr int kTileM = 128;
@@ -65,7 +64,7 @@ namespace gemm_config {
 
   using g2s_copy_op = SM80_CP_ASYNC_CACHEGLOBAL<cute::uint128_t>;
   using g2s_copy_traits = Copy_Traits<g2s_copy_op>;
-  using g2s_copy_atom = Copy_Atom<g2s_copy_traits, T>;
+  using g2s_copy_atom = Copy_Atom<g2s_copy_traits, half>;
 
   using G2SCopyA =
       decltype(make_tiled_copy(g2s_copy_atom{},
@@ -77,7 +76,7 @@ namespace gemm_config {
   // shared memory to register copy
   using s2r_copy_op = SM75_U32x4_LDSM_N;
   using s2r_copy_traits = Copy_Traits<s2r_copy_op>;
-  using s2r_copy_atom = Copy_Atom<s2r_copy_traits, T>;
+  using s2r_copy_atom = Copy_Atom<s2r_copy_traits, half>;
 
   using S2RCopyAtomA = s2r_copy_atom;
   using S2RCopyAtomB = s2r_copy_atom;
@@ -94,9 +93,9 @@ namespace gemm_config {
                     size(SmemLayoutC{}),
                 "C shared memory request is large than A's one pipe");
 
-  using R2SCopyAtomC = Copy_Atom<UniversalCopy<int>, T>;
+  using R2SCopyAtomC = Copy_Atom<UniversalCopy<int>, half>;
 
-  using S2GCopyAtomC = Copy_Atom<UniversalCopy<cute::uint128_t>, T>;
+  using S2GCopyAtomC = Copy_Atom<UniversalCopy<cute::uint128_t>, half>;
   using S2GCopyC =
       decltype(make_tiled_copy(S2GCopyAtomC{},
                                make_layout(make_shape(Int<32>{}, Int<4>{}),
@@ -109,7 +108,7 @@ namespace gemm_config {
   constexpr int shm_size_C = cute::cosize(SmemLayoutC{});
 
   constexpr int kShmSize =
-      cute::max(shm_size_AB, shm_size_C) * sizeof(T);
+      cute::max(shm_size_AB, shm_size_C) * sizeof(half);
 }
 
 __global__ void /* __launch_bounds__(128, 1) */
@@ -117,42 +116,21 @@ cute_gemm_multi_stage_kernel(void *Dptr, const void *Aptr, const void *Bptr, int
                  int k) {
   using namespace cute;
   using namespace gemm_config;
-  using X = Underscore;
+  extern __shared__ half shm_data[];
 
-//   using T = typename Config::T;
-//   using SmemLayoutA = typename Config::SmemLayoutA;
-//   using SmemLayoutB = typename Config::SmemLayoutB;
-//   using SmemLayoutC = typename Config::SmemLayoutC;
-    using TiledMMA = MMA;
-
-//   using S2RCopyAtomA = typename Config::S2RCopyAtomA;
-//   using S2RCopyAtomB = typename Config::S2RCopyAtomB;
-//   using G2SCopyA = typename Config::G2SCopyA;
-//   using G2SCopyB = typename Config::G2SCopyB;
-//   using R2SCopyAtomC = typename Config::R2SCopyAtomC;
-//   using S2GCopyAtomC = typename Config::S2GCopyAtomC;
-//   using S2GCopyC = typename Config::S2GCopyC;
-
-//   constexpr int kTileM = Config::kTileM;
-//   constexpr int kTileN = Config::kTileN;
-//   constexpr int kTileK = Config::kTileK;
-//   constexpr int kStage = Config::kStage;
-
-  extern __shared__ T shm_data[];
-
-  T *Ashm = shm_data;
-  T *Bshm = shm_data + cute::cosize(SmemLayoutA{});
+  half *Ashm = shm_data;
+  half *Bshm = shm_data + cute::cosize(SmemLayoutA{});
 
   int idx = threadIdx.x;
   int ix = blockIdx.x;
   int iy = blockIdx.y;
 
   // use Tensor notation to represent device pointer + dimension
-  Tensor A = make_tensor(make_gmem_ptr((T *)Aptr), make_shape(m, k),
+  Tensor A = make_tensor(make_gmem_ptr((half *)Aptr), make_shape(m, k),
                          make_stride(k, Int<1>{}));  // (M, K)
-  Tensor B = make_tensor(make_gmem_ptr((T *)Bptr), make_shape(n, k),
+  Tensor B = make_tensor(make_gmem_ptr((half *)Bptr), make_shape(n, k),
                          make_stride(k, Int<1>{}));  // (N, K)
-  Tensor D = make_tensor(make_gmem_ptr((T *)Dptr), make_shape(m, n),
+  Tensor D = make_tensor(make_gmem_ptr((half *)Dptr), make_shape(m, n),
                          make_stride(n, Int<1>{}));  // (M, N)
 
   // slice the tensor to small one which is used for current thread block.
@@ -171,7 +149,7 @@ cute_gemm_multi_stage_kernel(void *Dptr, const void *Aptr, const void *Bptr, int
 
   // dispatch TileA/TileB/TileC mma tensor into thread fragment via partition
   // method
-  TiledMMA tiled_mma;
+  MMA tiled_mma;
   auto thr_mma = tiled_mma.get_slice(idx);
   auto tCrA = thr_mma.partition_fragment_A(gA(_, _, 0));  // (MMA, MMA_M, MMA_K)
   auto tCrB = thr_mma.partition_fragment_B(gB(_, _, 0));  // (MMA, MMA_N, MMA_K)
@@ -329,7 +307,7 @@ cute_gemm_multi_stage_kernel(void *Dptr, const void *Aptr, const void *Bptr, int
     for (int j = 0; j < step; ++j) {
       // we add a temp tensor to cope with accumulator and output data type
       // difference
-      auto t = make_tensor_like<T>(tCrC_r2sx(_, i + j));
+      auto t = make_tensor_like<half>(tCrC_r2sx(_, i + j));
       cute::copy(tCrC_r2sx(_, i + j), t);
 
       cute::copy(r2s_tiled_copy_c, t, tCsC_r2s(_, 0, 0, j));
@@ -347,9 +325,7 @@ cute_gemm_multi_stage_kernel(void *Dptr, const void *Aptr, const void *Bptr, int
 }
 
 torch::Tensor cute_gemm_multi_stage(torch::Tensor A, torch::Tensor B){
-  const int M = A.size(0);
-  const int N = B.size(0);
-  const int K = A.size(1);
+  const int M = A.size(0);const int N = B.size(0);const int K = A.size(1);
   torch::Tensor C = torch::empty({M, N}, torch::dtype(torch::kHalf).device(torch::kCUDA));
 
   using namespace gemm_config;
