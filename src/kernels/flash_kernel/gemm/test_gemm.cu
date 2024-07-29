@@ -29,13 +29,13 @@ int main(int argc, char* argv[]){
     torch::Tensor b_half = b_float32.to(torch::kHalf);
 
     torch::Tensor c0 = sgemm_naive(a_float32, b_float32);
-    torch::Tensor c1 = gemm_pg2s_cute(a_half, b_half);
+    torch::Tensor c1 = gemm_asynccp_ldmatrix_tensorcore_cute(a_half, b_half);
 
     torch::Tensor c_ref_float32 = torch::matmul(a_float32, b_float32.transpose(0, 1));
     torch::Tensor c_ref_half = torch::matmul(a_half, b_half.transpose(0, 1));
 
     test(c0, c_ref_float32, "sgemm_navie");
-    test(c1, c_ref_half, "gemm_pg2s_cute");
+    test(c1, c_ref_half, "gemm_asynccp_ldmatrix_tensorcore_cute");
 
     // std::cout << c0.slice(0, 0, 4).slice(1, 0, 4) << std::endl;
     // std::cout << c_ref_float32.slice(0, 0, 4).slice(1, 0, 4) << std::endl;

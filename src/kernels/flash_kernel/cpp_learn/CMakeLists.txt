@@ -13,3 +13,10 @@ cc_binary(
   SRCS
     template2.cpp
 )
+
+cc_binary(
+  NAME
+    template3
+  SRCS
+    template3.cpp
+)

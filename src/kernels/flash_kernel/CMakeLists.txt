@@ -79,6 +79,7 @@ cc_binary(
     test_transpose.cu
   DEPS
     torch
+    cutlass
 )
 
 cc_binary(

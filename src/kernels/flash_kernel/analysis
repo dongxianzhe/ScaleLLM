@@ -1,26 +1,32 @@
-A :gmem_ptr[16b](0x7eb60e800000) o (1024,256):(256,_1)
-B :gmem_ptr[16b](0x7eb60e900000) o (1024,256):(256,_1)
-D :gmem_ptr[16b](0x7eb607e00000) o (1024,1024):(1024,_1)
-gA :gmem_ptr[16b](0x7eb60e800000) o (_128,_32,8):(256,_1,_32)
-gB :gmem_ptr[16b](0x7eb60e900000) o (_128,_32,8):(256,_1,_32)
-gD :gmem_ptr[16b](0x7eb607e00000) o (_128,_128):(1024,_1)
-sA :smem_ptr[16b](0x7eb631000000) o Sw<3,3,3> o _0 o (_128,_32,_3):(_32,_1,_4096)
-sB :smem_ptr[16b](0x7eb631006000) o Sw<3,3,3> o _0 o (_128,_32,_3):(_32,_1,_4096)
-tiled_mma :TiledMMA
-  ThrLayoutVMNK:  (_32,_2,_2,_1):(_1,_32,_64,_0)
+// 1. 原始tensor
+A :gmem_ptr[16b](0x7eb60e800000) o (1024,256):(256,_1) // K major
+B :gmem_ptr[16b](0x7eb60e900000) o (1024,256):(256,_1) // K major
+D :gmem_ptr[16b](0x7eb607e00000) o (1024,1024):(1024,_1) // N major
+// 2. 按照线程块划分任务, 找到自己的任务
+gA :gmem_ptr[16b](0x7eb60e800000) o (_128,_32,8):(256,_1,_32) // 先A zipped divide cta tiler, 然后bid选择对应的块
+gB :gmem_ptr[16b](0x7eb60e900000) o (_128,_32,8):(256,_1,_32) // 先B zipped divide cta tiler, 然后bid选择对应的块
+gD :gmem_ptr[16b](0x7eb607e00000) o (_128,_128):(1024,_1) // 先C zipped divide cta tiler，然后bid选择对应的块
+// 3. 创建smem
+sA :smem_ptr[16b](0x7eb631000000) o Sw<3,3,3> o _0 o (_128,_32,_3):(_32,_1,_4096) // 分配128 * 32 * 3的空间，BK major
+sB :smem_ptr[16b](0x7eb631006000) o Sw<3,3,3> o _0 o (_128,_32,_3):(_32,_1,_4096) // 分配128 * 32 * 3的空间，BK major
+
+// 4.从compute的角度看矩阵，那么会产生三个Tensor tCrA,tCrB,tCrD
+tiled_mma :TiledMMA // tensor core指令的复合
+  ThrLayoutVMNK:  (_32,_2,_2,_1):(_1,_32,_64,_0) // (laneid，warpidM，warpidN) -> tid
   PermutationMNK: (_32,_32,_16)
 MMA_Atom
   ThrID:      _32:_1
-  Shape_MNK:  (_16,_8,_16)
-  LayoutA_TV: ((_4,_8),(_2,_2,_2)):((_32,_1),(_16,_8,_128))
-  LayoutB_TV: ((_4,_8),(_2,_2)):((_16,_1),(_8,_64))
-  LayoutC_TV: ((_4,_8),(_2,_2)):((_32,_1),(_16,_8))
+  Shape_MNK:  (_16,_8,_16) // 一个指令计算16x
+  LayoutA_TV: ((_4,_8),(_2,_2,_2)):((_32,_1),(_16,_8,_128)) // (tid, vid) -> logic A id
+  LayoutB_TV: ((_4,_8),(_2,_2)):((_16,_1),(_8,_64)) // (tid, vid) -> logic B id
+  LayoutC_TV: ((_4,_8),(_2,_2)):((_32,_1),(_16,_8)) // (tid, vid) -> logic C id
 
 thrmma :ThrMMA
-  Thr VMNK: (0,0,0,_0)
+  Thr_VMNK: (0,0,0,_0)
 TiledMMA
-  ThrLayoutVMNK:  (_32,_2,_2,_1):(_1,_32,_64,_0)
-  PermutationMNK: (_32,_32,_16)
+  ThrLayoutVMNK:  (_32,_2,_2,_1):(_1,_32,_64,_0) // logic （laneid, warpidM, warpidN) tid = -> tid 
+  PermutationMNK: (_32,_32,_16) // gA会根据这个进行local parition，然后根据tid和ThrLayoutVMNK的逆找到warpidM和warpidN，然后在根据这这两个进行选择(warpIdM, warpidN)进行选择
+  // 比如求tCrA: gA(_, _, 0:) (128, 32) - zipped divide shapeMNK (32, 16) -> ((32, 16), (4, 2))
 MMA_Atom
   ThrID:      _32:_1
   Shape_MNK:  (_16,_8,_16)
@@ -28,16 +34,24 @@ MMA_Atom
   LayoutB_TV: ((_4,_8),(_2,_2)):((_16,_1),(_8,_64))
   LayoutC_TV: ((_4,_8),(_2,_2)):((_32,_1),(_16,_8))
 
-tCrA :ptr[16b](0x7eb62ffffa70) o ((_2,_2,_2),_4,_2):((_1,_2,_4),_16,_8)
+// 计算128 * 32 和 32 * 128矩阵乘需要的寄存器
+tCrA :((_2, _2, _2), _4, _2):((_1,_2,_4),_16,_8) // 128 / (16 * 2) = 4寄存器M扩展四遍，寄存器N扩展32 / 16 = 2扩展两遍 , major: v, k, m
+// 一个线程8个half，4个和2个
+// gA(_, _, 0) zipped divide PermutationMNK, 然后按照根据ThrLayoutVMNK-1（tid）找到laneid，warpidM，warpidN，然后根据laneid和LayoutA_TV找到  logical A id，根据warpidM和warpidN和Shape_MNK和logical A id找到logical A tile id
 tCrB :ptr[16b](0x7eb62ffffaf0) o ((_2,_2),(_2,_4),_2):((_1,_2),(_8,_16),_4)
+// 一条指令4个寄存器。需要N扩展(128 / (8 * 2)) = 8 次, K扩展 32 / 16 = 2遍, major: v,k,n
 tCrD :ptr[16b](0x7eb62ffffb70) o ((_2,_2),_4,_8):((_1,_2),_4,_16)
+// 一条指令4个寄存器。需要N扩展 128 / (16 * 2) = 4, M需扩展128 / (8 * 2) = 8次 major: v, m, n
+
+
+// 5. 从smem到reg的复制的角度看，会有4个tensor：tAsA->tArA,tBsB->tBrB (其中tArA和tBrB在compute角度中已经创建了，因此命名为tCrA_view,tCrB_view)
 s2r_tiled_copy_a:TiledCopy
-  Tiler_MN:       (_32,_16)
+  Tiler_MN:       (_32,_16)  // 虽然又4个warp，但是从smem到reg拷贝的时候有些warp拷贝的内容是相同的。每个warp拷贝的四个小矩阵32x8
   TiledLayout_TV: ((_4,_8,_2,_2),((_2,_2,_2),(_1,_1))):((_64,_1,_16,_0),((_32,_8,_256),(_0,_0)))
 Copy_Atom
   ThrID:        _32:_1
-  ValLayoutSrc: (_32,_8):(_8,_1)
-  ValLayoutDst: (_32,(_2,_4)):(_2,(_1,_64))
+  ValLayoutSrc: (_32,_8):(_8,_1) // 32个线程，一个线程load 8个half,4个8x8的小矩阵
+  ValLayoutDst: (_32,(_2,_4)):(_2,(_1,_64)) // 32个线程，每个每个寄存器存两个数，4个寄存器，其中每个寄存器内偏移为shared memory物理地址的1，寄存器间偏移为shared memory的物理地址的64
   ValLayoutRef: (_32,(_2,_4)):(_2,(_1,_64))
   ValueType:    16b
 
@@ -79,12 +93,14 @@ Copy_Atom
 
 tBsB:smem_ptr[16b](0x7eb631006000) o ((_8,_1),_4,_2,_3):((_1,_0),_1024,16,_4096)
 tCrB_view:ptr[16b](0x7eb62ffffaf0) o (((_4,_2),_1),_4,_2):(((_1,_8),_0),_16,_4)
+
+// 6. 从global到smem的角度看，tAgA->tAsA,tBgB->tBsB
 g2s_tiled_copy_a: TiledCopy
-  Tiler_MN:       (_32,_32)
-  TiledLayout_TV: ((_4,_32),_8):((_256,_1),_32)
+  Tiler_MN:       (_32,_32) // 一个tile是32 * 32个half，共4个tile
+  TiledLayout_TV: ((_4,_32),_8):((_256,_1),_32) // 4 * 32条指令
 Copy_Atom
   ThrID:        _1:_0
-  ValLayoutSrc: (_1,_8):(_0,_1)
+  ValLayoutSrc: (_1,_8):(_0,_1) // 一条指令负责8个half
   ValLayoutDst: (_1,_8):(_0,_1)
   ValLayoutRef: (_1,_8):(_0,_1)
   ValueType:    16b
@@ -93,7 +109,7 @@ g2s_thr_copy_a: ThrCopy
   ThrIdx: 0
 TiledCopy
   Tiler_MN:       (_32,_32)
-  TiledLayout_TV: ((_4,_32),_8):((_256,_1),_32)
+  TiledLayout_TV: ((_4,_32),_8):((_256,_1),_32) // 256 = 32 * 8意思是8列，1意思是一行，32意思是一列，这里就是说一个线程拷贝沿K轴的连续的8个half
 Copy_Atom
   ThrID:        _1:_0
   ValLayoutSrc: (_1,_8):(_0,_1)
@@ -101,8 +117,9 @@ Copy_Atom
   ValLayoutRef: (_1,_8):(_0,_1)
   ValueType:    16b
 
-tAgA_copy: gmem_ptr[16b](0x7eb60e800000) o ((_8,_1),_4,_1,8):((_1,_0),8192,_0,_32)
+tAgA_copy: gmem_ptr[16b](0x7eb60e800000) o ((_8,_1),_4,_1,8):((_1,_0),8192,_0,_32) // 128 / 32=4,沿M轴扩展四次，k轴一次，总共有8个K_BLOCK。
 tAsA_copy: smem_ptr[16b](0x7eb631000000) o ((_8,_1),_4,_1,_3):((_1,_0),_1024,_0,_4096)
+// 1024 = 32 * 32
 g2s_tiled_copy_b: TiledCopy
   Tiler_MN:       (_32,_32)
   TiledLayout_TV: ((_4,_32),_8):((_256,_1),_32)
