@@ -101,7 +101,7 @@ __global__ void cute_gemm_multi_stage_kernel(void *Dptr, const void *Aptr, const
   cute::copy(s2r_tiled_copy_a, tAsA(_, _, ik, ismem_read), tCrA_view(_, _, ik));
   cute::copy(s2r_tiled_copy_b, tBsB(_, _, ik, ismem_read), tCrB_view(_, _, ik));
 
-  int ntile = k / kTileK;
+  const int ntile = k / kTileK;
 #pragma unroll 1
   for (int itile = 0; itile < ntile; ++itile) {
     int nk = size<2>(tCrA);
@@ -117,11 +117,8 @@ __global__ void cute_gemm_multi_stage_kernel(void *Dptr, const void *Aptr, const
         ismem_read = (ismem_read + 1) % kStage;
       }
 
-      // shm -> reg s[itile][ik + 1] -> r[ik + 1]
-      cute::copy(s2r_tiled_copy_a, tAsA(_, _, ik_next, ismem_read),
-                 tCrA_view(_, _, ik_next));
-      cute::copy(s2r_tiled_copy_b, tBsB(_, _, ik_next, ismem_read),
-                 tCrB_view(_, _, ik_next));
+      cute::copy(s2r_tiled_copy_a, tAsA(_, _, ik_next, ismem_read), tCrA_view(_, _, ik_next));
+      cute::copy(s2r_tiled_copy_b, tBsB(_, _, ik_next, ismem_read), tCrB_view(_, _, ik_next));
 
       if (ik == 0) {
         if (itile_to_read < ntile) {
@@ -156,10 +153,9 @@ __global__ void cute_gemm_multi_stage_kernel(void *Dptr, const void *Aptr, const
   auto tCgC_s2gx = group_modes<1, 3>(tCgC_s2g);  // (CPY_, CPY_MN)
   auto tCrC_r2sx = group_modes<1, 3>(tCrC_r2s);  // (CPY_, CPY_MN)
 
-  int step = size<3>(tCsC_r2s);  // pipe
+  int step = size<3>(tCsC_r2s);
 #pragma unroll
   for (int i = 0; i < size<1>(tCrC_r2sx); i += step) {
-    // reg -> shm
 #pragma unroll
     for (int j = 0; j < step; ++j) {
       auto t = make_tensor_like<half>(tCrC_r2sx(_, i + j));
@@ -169,9 +165,7 @@ __global__ void cute_gemm_multi_stage_kernel(void *Dptr, const void *Aptr, const
     __syncthreads();
 
 #pragma unroll
-    for (int j = 0; j < step; ++j) {
-      cute::copy(s2g_tiled_copy_c, tCsC_s2g(_, 0, 0, j), tCgC_s2gx(_, i + j));
-    }
+    for (int j = 0; j < step; ++j) cute::copy(s2g_tiled_copy_c, tCsC_s2g(_, 0, 0, j), tCgC_s2gx(_, i + j));
     __syncthreads();
   }
 }
