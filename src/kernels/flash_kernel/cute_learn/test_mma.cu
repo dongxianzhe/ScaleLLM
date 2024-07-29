@@ -70,17 +70,7 @@ namespace gemm_config {
 
   using R2SCopyAtomC = Copy_Atom<UniversalCopy<int>, half>;
 
-  using S2GCopyAtomC = Copy_Atom<UniversalCopy<cute::uint128_t>, half>;
-  using S2GCopyC = decltype(make_tiled_copy(S2GCopyAtomC{},
-                               make_layout(make_shape(Int<32>{}, Int<4>{}),
-                                           make_stride(Int<4>{}, Int<1>{})),
-                               make_layout(make_shape(Int<1>{}, Int<8>{}))));
 
-  constexpr int kThreadNum = size(MMA{});
-  constexpr int shm_size_AB = cute::cosize(SmemLayoutA{}) + cute::cosize(SmemLayoutB{});
-  constexpr int shm_size_C = cute::cosize(SmemLayoutC{});
-
-  constexpr int kShmSize = cute::max(shm_size_AB, shm_size_C) * sizeof(half);
 }
 
 __global__ void /* __launch_bounds__(128, 1) */
@@ -212,7 +202,10 @@ cute_gemm_multi_stage_kernel(void *Dptr, const void *Aptr, const void *Bptr, int
   auto tCrC_r2s = r2s_thr_copy_c.retile_S(tCrD);   // (CPY, CPY_M, CPY_N)
   auto tCsC_r2s = r2s_thr_copy_c.partition_D(sC);  // (CPY, _1, _1, pipe)
 
-  S2GCopyC s2g_tiled_copy_c;
+  auto s2g_tiled_copy_c = make_tiled_copy(Copy_Atom<UniversalCopy<cute::uint128_t>, half>{},
+                               make_layout(make_shape(Int<32>{}, Int<4>{}),
+                                           make_stride(Int<4>{}, Int<1>{})),
+                               make_layout(make_shape(Int<1>{}, Int<8>{})));
   auto s2g_thr_copy_c = s2g_tiled_copy_c.get_thread_slice(idx);
   auto tCsC_s2g = s2g_thr_copy_c.partition_S(sC);  // (CPY, _1, _1, pipe)
   auto tCgC_s2g = s2g_thr_copy_c.partition_D(gD);  // (CPY, CPY_M, CPY_N)
@@ -243,20 +236,24 @@ cute_gemm_multi_stage_kernel(void *Dptr, const void *Aptr, const void *Bptr, int
 }
 
 torch::Tensor cute_gemm_multi_stage(torch::Tensor A, torch::Tensor B){
-  using namespace gemm_config;
-  const int M = A.size(0);const int N = B.size(0);const int K = A.size(1);
-  torch::Tensor C = torch::empty({M, N}, torch::dtype(torch::kHalf).device(torch::kCUDA));
+    using namespace gemm_config;
+    const int M = A.size(0);const int N = B.size(0);const int K = A.size(1);
+    torch::Tensor C = torch::empty({M, N}, torch::dtype(torch::kHalf).device(torch::kCUDA));
 
-  dim3 block = kThreadNum;
-  dim3 grid(N / kTileN, M / kTileM);
-  int shm_size = kShmSize;
-  cudaFuncSetAttribute(cute_gemm_multi_stage_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    dim3 block(size(MMA{}));
+    dim3 grid(N / kTileN, M / kTileM);
+
+    constexpr int shm_size_AB = cute::cosize(SmemLayoutA{}) + cute::cosize(SmemLayoutB{});
+    constexpr int shm_size_C = cute::cosize(SmemLayoutC{});
+    constexpr int kShmSize = cute::max(shm_size_AB, shm_size_C) * sizeof(half);
+    int shm_size = kShmSize;
+    cudaFuncSetAttribute(cute_gemm_multi_stage_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cute_gemm_multi_stage_kernel<<<grid, block, shm_size>>>(
     C.data_ptr(),
     A.data_ptr(),
     B.data_ptr(),
     M, N, K);
-  return C;
+    return C;
 }
 
 int main(){
