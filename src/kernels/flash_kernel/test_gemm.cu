@@ -36,7 +36,8 @@ int main(int argc, char* argv[]) {
     auto C6 = sgemm_smem_reg_coalesce_pg2s_ps2r(A, B);
     auto C7 = cute_sgemm_naive(A, B);
     auto C8 = cute_mma_gemm_simple(A_half, B_half);
-    auto C9 = cute_gemm_multi_stage(A_half, B_half);
+    auto C9 = cute_gemm_multi_stage(A_half, B_half.transpose(0, 1).contiguous());
+    auto C10 = cute_gemm_multi_stage_demo(A_half, B_half);
 
     auto C_ref = torch::matmul(A, B);
     auto C_ref_half = torch::matmul(A_half, B_half);
@@ -50,6 +51,7 @@ int main(int argc, char* argv[]) {
     test(C_ref, C7, "cute_sgemm_naive");
     test(C_ref_half, C8, "cute_mma_gemm_simple");
     test(C_ref_half, C9, "cute_gemm_multi_stage");
+    test(C_ref_half, C10, "cute_gemm_multi_stage_demo");
 
     return 0;
 }
