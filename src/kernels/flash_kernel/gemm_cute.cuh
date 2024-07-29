@@ -188,15 +188,17 @@ struct GemmConfig {
   static constexpr int kMmaEURepeatK = 1;
 
   using mma_atom_shape = mma_traits::Shape_MNK; // ???
-  static constexpr int kMmaPM = 1 * kMmaEURepeatM * get<0>(mma_atom_shape{}); // ???
-  static constexpr int kMmaPN = 2 * kMmaEURepeatN * get<1>(mma_atom_shape{}); // ???
-  static constexpr int kMmaPK = 1 * kMmaEURepeatK * get<2>(mma_atom_shape{}); // ???
+  static constexpr int kMmaPM = 1 * kMmaEURepeatM * get<0>(mma_atom_shape{}); // ??? 1 * 2 * 16 = 32
+  static constexpr int kMmaPN = 2 * kMmaEURepeatN * get<1>(mma_atom_shape{}); // ??? 2 * 2 * 8  = 32
+  static constexpr int kMmaPK = 1 * kMmaEURepeatK * get<2>(mma_atom_shape{}); // ??? 1 * 1 * 16 = 16
 
   using MMA_EU_RepeatT = decltype(make_layout(make_shape(
       Int<kMmaEURepeatM>{}, Int<kMmaEURepeatN>{}, Int<kMmaEURepeatK>{})));
   using MMA_P_T = Tile<Int<kMmaPM>, Int<kMmaPN>, Int<kMmaPK>>; // ???
 
-  using MMA = decltype(make_tiled_mma(mma_atom{}, MMA_EU_RepeatT{}, MMA_P_T{}));
+  using MMA = decltype(make_tiled_mma(mma_atom{}, MMA_EU_RepeatT{}
+  ,MMA_P_T{}
+   ));
 
   using g2s_copy_op = SM80_CP_ASYNC_CACHEGLOBAL<cute::uint128_t>;
   using g2s_copy_traits = Copy_Traits<g2s_copy_op>;

@@ -1,5 +1,9 @@
 #include<iostream>
 #include<torch/torch.h>
+#include<cute/layout.hpp>
+#include<cute/stride.hpp>
+#include<cute/tensor.hpp>
+#include<cute/swizzle.hpp>
 
 
 template<int BLOCK_SIZE_N, int BLOCK_SIZE_M>
@@ -104,6 +108,45 @@ torch::Tensor transpose_smem_optimized_nobankconflict(torch::Tensor a){
     return o;
 }
 
+__global__ void cute_transpose_kernel(float* aptr, float* optr, int M, int N){
+    using namespace cute;
+    Tensor A = make_tensor(make_gmem_ptr(aptr), make_layout(make_shape(M, N), make_stride(N, Int<1>{})));
+    Tensor O = make_tensor(make_gmem_ptr(optr), make_layout(make_shape(M, N), make_stride(Int<1>{}, M)));
+    Tensor gA = local_tile(
+        A,
+        make_shape(128, 128),
+        make_coord(blockIdx.x, blockIdx.y));
+    Tensor gO = local_tile(
+        O,
+        make_shape(128, 128),
+        make_coord(blockIdx.x, blockIdx.y));
+        
+    Tensor tAgA = local_partition(gA, make_layout(make_shape(Int<128>{}, Int<1>{}), make_stride(Int<1>{}, Int<1>{})), threadIdx.x + blockDim.x * threadIdx.y);
+    Tensor tOgO = local_partition(gO, make_layout(make_shape(Int<128>{}, Int<1>{}), make_stride(Int<1>{}, Int<1>{})), threadIdx.x + blockDim.x * threadIdx.y);
+    // if(thread0()){
+    //     printf("gA  : ");print(gA);printf("\n");
+    //     printf("gO  : ");print(gO);printf("\n");
+    //     printf("tAgA: ");print(tAgA);printf("\n");
+    //     printf("tOgO: ");print(tOgO);printf("\n");
+    // }
+    copy(tAgA, tOgO);
+}
+
+torch::Tensor cute_transpose(torch::Tensor a){
+    const int M = a.size(0);
+    const int N = a.size(1);
+    torch::Tensor o = torch::empty({N, M}, torch::dtype(torch::kFloat32).device(torch::kCUDA));
+    dim3 gridDim(M / 128, N / 128);
+    dim3 blockDim(128);
+    
+    cute_transpose_kernel<<<gridDim, blockDim>>>(
+        static_cast<float*>(a.data_ptr()),
+        static_cast<float*>(o.data_ptr()),
+        M, N
+    );
+    return o;
+}
+
 void test(torch::Tensor o, torch::Tensor o_ref, const char* name){
     if(o.is_cuda())o = o.to(torch::kCPU);
     if(o_ref.is_cuda())o_ref = o_ref.to(torch::kCPU);
@@ -126,6 +169,8 @@ int main(int argc, char* argv[]){
     torch::Tensor o2 = transpose_smem(a);
     torch::Tensor o3 = transpose_smem_optimized(a);
     torch::Tensor o4 = transpose_smem_optimized_nobankconflict(a);
+    torch::Tensor o5 = cute_transpose(a);
+
 
     torch::Tensor o_ref = a.transpose(0, 1).contiguous();
 
@@ -134,6 +179,7 @@ int main(int argc, char* argv[]){
     test(o2, o_ref, "transpose_smem");
     test(o3, o_ref, "transpose_smem_optimized");
     test(o4, o_ref, "transpose_smem_optimized_nobankconflict");
+    test(o5, o_ref, "cute_transpose");
 
     // std::cout << a.slice(0, 0, 4).slice(1, 0, 4) << std::endl;
     // std::cout << o.slice(0, 0, 4).slice(1, 0, 4) << std::endl;
