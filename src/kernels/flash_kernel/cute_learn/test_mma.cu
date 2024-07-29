@@ -39,16 +39,6 @@ namespace gemm_config {
     make_layout(make_shape(Int<2>{}, Int<2>{}, Int<1>{})), 
     Tile<Int<kMmaPM>, Int<kMmaPN>, Int<kMmaPK>>{}));
 
-  using g2s_copy_op = SM80_CP_ASYNC_CACHEGLOBAL<cute::uint128_t>;
-  using g2s_copy_traits = Copy_Traits<g2s_copy_op>;
-  using g2s_copy_atom = Copy_Atom<g2s_copy_traits, half>;
-
-  using G2SCopyA =
-      decltype(make_tiled_copy(g2s_copy_atom{},
-                               make_layout(make_shape(Int<32>{}, Int<4>{}),
-                                           make_stride(Int<4>{}, Int<1>{})),
-                               make_layout(make_shape(Int<1>{}, Int<8>{}))));
-  using G2SCopyB = G2SCopyA;
 
   // shared memory to register copy
   using s2r_copy_op = SM75_U32x4_LDSM_N;
@@ -69,13 +59,9 @@ namespace gemm_config {
   static_assert(size<0>(SmemLayoutA{}) * size<1>(SmemLayoutA{}) >= size(SmemLayoutC{}), "C shared memory request is large than A's one pipe");
 
   using R2SCopyAtomC = Copy_Atom<UniversalCopy<int>, half>;
-
-
 }
 
-__global__ void /* __launch_bounds__(128, 1) */
-cute_gemm_multi_stage_kernel(void *Dptr, const void *Aptr, const void *Bptr, int m, int n,
-                 int k) {
+__global__ void cute_gemm_multi_stage_kernel(void *Dptr, const void *Aptr, const void *Bptr, int m, int n, int k) {
   using namespace cute;
   using namespace gemm_config;
   extern __shared__ half shm_data[];
@@ -119,18 +105,15 @@ cute_gemm_multi_stage_kernel(void *Dptr, const void *Aptr, const void *Bptr, int
   auto tBsB = s2r_thr_copy_b.partition_S(sB);  // (CPY, CPY_M, CPY_K, kStage)
   auto tCrB_view = s2r_thr_copy_b.retile_D(tCrB);  // (CPY, CPY_M, CPY_K)
 
-  G2SCopyA g2s_tiled_copy_a;
-  auto g2s_thr_copy_a = g2s_tiled_copy_a.get_slice(idx);
-  auto tAgA_copy = g2s_thr_copy_a.partition_S(gA);  // (CPY, CPY_M, CPY_K, k)
-  auto tAsA_copy =
-      g2s_thr_copy_a.partition_D(sA);  // (CPY, CPY_M, CPY_K, kStage)
 
-  G2SCopyB g2s_tiled_copy_b;
-  auto g2s_thr_copy_b = g2s_tiled_copy_b.get_slice(idx);
-  auto tBgB_copy = g2s_thr_copy_b.partition_S(gB);  // (CPY, CPY_N, CPY_K, k)
-  auto tBsB_copy =
-      g2s_thr_copy_b.partition_D(sB);  // (CPY, CPY_N, CPY_K, kStage)
-
+  auto g2s_tiled_copy_ab = make_tiled_copy(Copy_Atom<SM80_CP_ASYNC_CACHEGLOBAL<cute::uint128_t>, half>{},
+                               make_layout(make_shape(Int<32>{}, Int<4>{}), make_stride(Int<4>{}, Int<1>{})),
+                               make_layout(make_shape(Int<1>{}, Int<8>{})));
+  auto g2s_thr_copy_ab = g2s_tiled_copy_ab.get_slice(idx);
+  auto tAgA_copy = g2s_thr_copy_ab.partition_S(gA);  // (CPY, CPY_M, CPY_K, k)
+  auto tAsA_copy = g2s_thr_copy_ab.partition_D(sA);  // (CPY, CPY_M, CPY_K, kStage)
+  auto tBgB_copy = g2s_thr_copy_ab.partition_S(gB);  // (CPY, CPY_N, CPY_K, k)
+  auto tBsB_copy = g2s_thr_copy_ab.partition_D(sB);  // (CPY, CPY_N, CPY_K, kStage)
 
   int itile_to_read = 0;
   int ismem_read = 0;
@@ -138,9 +121,9 @@ cute_gemm_multi_stage_kernel(void *Dptr, const void *Aptr, const void *Bptr, int
 
 #pragma unroll
   for (int istage = 0; istage < kStage - 1; ++istage) {
-    cute::copy(g2s_tiled_copy_a, tAgA_copy(_, _, _, istage),
+    cute::copy(g2s_tiled_copy_ab, tAgA_copy(_, _, _, istage),
                tAsA_copy(_, _, _, istage));
-    cute::copy(g2s_tiled_copy_b, tBgB_copy(_, _, _, istage),
+    cute::copy(g2s_tiled_copy_ab, tBgB_copy(_, _, _, istage),
                tBsB_copy(_, _, _, istage));
     cp_async_fence();
 
@@ -179,9 +162,9 @@ cute_gemm_multi_stage_kernel(void *Dptr, const void *Aptr, const void *Bptr, int
 
       if (ik == 0) {
         if (itile_to_read < ntile) {
-          cute::copy(g2s_tiled_copy_a, tAgA_copy(_, _, _, itile_to_read),
+          cute::copy(g2s_tiled_copy_ab, tAgA_copy(_, _, _, itile_to_read),
                      tAsA_copy(_, _, _, ismem_write));
-          cute::copy(g2s_tiled_copy_b, tBgB_copy(_, _, _, itile_to_read),
+          cute::copy(g2s_tiled_copy_ab, tBgB_copy(_, _, _, itile_to_read),
                      tBsB_copy(_, _, _, ismem_write));
 
           ++itile_to_read;
