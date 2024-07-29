@@ -13,24 +13,16 @@ void test(torch::Tensor a, torch::Tensor b, std::string name){
         std::cout << name << ": fail" << std::endl;
     }
 }
-
-
 namespace gemm_config {
   using namespace cute;
-
-  // tile configuration
   constexpr int kTileM = 128;
   constexpr int kTileN = 128;
   constexpr int kTileK = 32;
   constexpr int kStage = 3;
   constexpr int kSmemLayoutCBatch = 2;
 
-  constexpr int kShmLoadSwizzleM = 3;
-  constexpr int kShmLoadSwizzleS = 3;
-  constexpr int kShmLoadSwizzleB = 3;
-
   using SmemLayoutAtom = decltype(composition(
-      Swizzle<kShmLoadSwizzleB, kShmLoadSwizzleM, kShmLoadSwizzleS>{},
+      Swizzle<3, 3, 3>{},
       make_layout(make_shape(Int<8>{}, Int<kTileK>{}),
                   make_stride(Int<kTileK>{}, Int<1>{}))));
   using SmemLayoutA = decltype(
@@ -40,27 +32,12 @@ namespace gemm_config {
       tile_to_shape(SmemLayoutAtom{},
                     make_shape(Int<kTileN>{}, Int<kTileK>{}, Int<kStage>{})));
 
-  using mma_op = SM80_16x8x16_F16F16F16F16_TN;
+  constexpr int kMmaPM = 32;constexpr int kMmaPN = 32;constexpr int kMmaPK = 16;
 
-  using mma_traits = MMA_Traits<mma_op>;
-  using mma_atom = MMA_Atom<mma_traits>;
-
-  constexpr int kMmaEURepeatM = 2;
-  constexpr int kMmaEURepeatN = 2;
-  constexpr int kMmaEURepeatK = 1;
-
-  using mma_atom_shape = mma_traits::Shape_MNK; // ???
-  constexpr int kMmaPM = 1 * kMmaEURepeatM * get<0>(mma_atom_shape{}); // ??? 1 * 2 * 16 = 32
-  constexpr int kMmaPN = 2 * kMmaEURepeatN * get<1>(mma_atom_shape{}); // ??? 2 * 2 * 8  = 32
-  constexpr int kMmaPK = 1 * kMmaEURepeatK * get<2>(mma_atom_shape{}); // ??? 1 * 1 * 16 = 16
-
-  using MMA_EU_RepeatT = decltype(make_layout(make_shape(
-      Int<kMmaEURepeatM>{}, Int<kMmaEURepeatN>{}, Int<kMmaEURepeatK>{})));
-  using MMA_P_T = Tile<Int<kMmaPM>, Int<kMmaPN>, Int<kMmaPK>>; // ???
-
-  using MMA = decltype(make_tiled_mma(mma_atom{}, MMA_EU_RepeatT{}
-  ,MMA_P_T{}
-   ));
+  using MMA = decltype(make_tiled_mma(
+    SM80_16x8x16_F16F16F16F16_TN{},
+    make_layout(make_shape(Int<2>{}, Int<2>{}, Int<1>{})), 
+    Tile<Int<kMmaPM>, Int<kMmaPN>, Int<kMmaPK>>{}));
 
   using g2s_copy_op = SM80_CP_ASYNC_CACHEGLOBAL<cute::uint128_t>;
   using g2s_copy_traits = Copy_Traits<g2s_copy_op>;
@@ -89,26 +66,21 @@ namespace gemm_config {
       SmemLayoutAtomC{},
       make_shape(Int<kMmaPM>{}, Int<kMmaPN>{}, Int<kSmemLayoutCBatch>{})));
 
-  static_assert(size<0>(SmemLayoutA{}) * size<1>(SmemLayoutA{}) >=
-                    size(SmemLayoutC{}),
-                "C shared memory request is large than A's one pipe");
+  static_assert(size<0>(SmemLayoutA{}) * size<1>(SmemLayoutA{}) >= size(SmemLayoutC{}), "C shared memory request is large than A's one pipe");
 
   using R2SCopyAtomC = Copy_Atom<UniversalCopy<int>, half>;
 
   using S2GCopyAtomC = Copy_Atom<UniversalCopy<cute::uint128_t>, half>;
-  using S2GCopyC =
-      decltype(make_tiled_copy(S2GCopyAtomC{},
+  using S2GCopyC = decltype(make_tiled_copy(S2GCopyAtomC{},
                                make_layout(make_shape(Int<32>{}, Int<4>{}),
                                            make_stride(Int<4>{}, Int<1>{})),
                                make_layout(make_shape(Int<1>{}, Int<8>{}))));
 
   constexpr int kThreadNum = size(MMA{});
-  constexpr int shm_size_AB =
-      cute::cosize(SmemLayoutA{}) + cute::cosize(SmemLayoutB{});
+  constexpr int shm_size_AB = cute::cosize(SmemLayoutA{}) + cute::cosize(SmemLayoutB{});
   constexpr int shm_size_C = cute::cosize(SmemLayoutC{});
 
-  constexpr int kShmSize =
-      cute::max(shm_size_AB, shm_size_C) * sizeof(half);
+  constexpr int kShmSize = cute::max(shm_size_AB, shm_size_C) * sizeof(half);
 }
 
 __global__ void /* __launch_bounds__(128, 1) */
@@ -121,31 +93,21 @@ cute_gemm_multi_stage_kernel(void *Dptr, const void *Aptr, const void *Bptr, int
   half *Ashm = shm_data;
   half *Bshm = shm_data + cute::cosize(SmemLayoutA{});
 
-  int idx = threadIdx.x;
-  int ix = blockIdx.x;
-  int iy = blockIdx.y;
+  int idx = threadIdx.x;int ix = blockIdx.x;int iy = blockIdx.y;
 
   // use Tensor notation to represent device pointer + dimension
-  Tensor A = make_tensor(make_gmem_ptr((half *)Aptr), make_shape(m, k),
-                         make_stride(k, Int<1>{}));  // (M, K)
-  Tensor B = make_tensor(make_gmem_ptr((half *)Bptr), make_shape(n, k),
-                         make_stride(k, Int<1>{}));  // (N, K)
-  Tensor D = make_tensor(make_gmem_ptr((half *)Dptr), make_shape(m, n),
-                         make_stride(n, Int<1>{}));  // (M, N)
+  Tensor A = make_tensor(make_gmem_ptr((half *)Aptr), make_shape(m, k), make_stride(k, Int<1>{}));  // (M, K)
+  Tensor B = make_tensor(make_gmem_ptr((half *)Bptr), make_shape(n, k), make_stride(k, Int<1>{}));  // (N, K)
+  Tensor D = make_tensor(make_gmem_ptr((half *)Dptr), make_shape(m, n), make_stride(n, Int<1>{}));  // (M, N)
 
   // slice the tensor to small one which is used for current thread block.
-  Tensor gA = local_tile(A, make_tile(Int<kTileM>{}, Int<kTileK>{}),
-                         make_coord(iy, _));  // (kTileM, kTileK, k)
-  Tensor gB = local_tile(B, make_tile(Int<kTileN>{}, Int<kTileK>{}),
-                         make_coord(ix, _));  // (kTileN, kTileK, k)
-  Tensor gD = local_tile(D, make_tile(Int<kTileM>{}, Int<kTileN>{}),
-                         make_coord(iy, ix));  // (kTileM, kTileN)
+  Tensor gA = local_tile(A, make_tile(Int<kTileM>{}, Int<kTileK>{}), make_coord(iy, _));  // (kTileM, kTileK, k)
+  Tensor gB = local_tile(B, make_tile(Int<kTileN>{}, Int<kTileK>{}), make_coord(ix, _));  // (kTileN, kTileK, k)
+  Tensor gD = local_tile(D, make_tile(Int<kTileM>{}, Int<kTileN>{}), make_coord(iy, ix));  // (kTileM, kTileN)
 
   // shared memory
-  auto sA = make_tensor(make_smem_ptr(Ashm),
-                        SmemLayoutA{});  // (kTileM, kTileK, kStage)
-  auto sB = make_tensor(make_smem_ptr(Bshm),
-                        SmemLayoutB{});  // (kTileN, kTileK, kStage)
+  auto sA = make_tensor(make_smem_ptr(Ashm), SmemLayoutA{});  // (kTileM, kTileK, kStage)
+  auto sB = make_tensor(make_smem_ptr(Bshm), SmemLayoutB{});  // (kTileN, kTileK, kStage)
 
   // dispatch TileA/TileB/TileC mma tensor into thread fragment via partition
   // method
@@ -155,20 +117,17 @@ cute_gemm_multi_stage_kernel(void *Dptr, const void *Aptr, const void *Bptr, int
   auto tCrB = thr_mma.partition_fragment_B(gB(_, _, 0));  // (MMA, MMA_N, MMA_K)
   auto tCrD = thr_mma.partition_fragment_C(gD);           // (MMA, MMA_M, MMA_N)
 
-
-  // fill zero for accumulator
   clear(tCrD);
 
-  // gmem -cp.async-> shm -ldmatrix-> reg
   auto s2r_tiled_copy_a = make_tiled_copy_A(S2RCopyAtomA{}, tiled_mma);
   auto s2r_thr_copy_a = s2r_tiled_copy_a.get_slice(idx);
-  auto tAsA = s2r_thr_copy_a.partition_S(sA);  // ? (CPY, CPY_M, CPY_K, kStage)
-  auto tCrA_view = s2r_thr_copy_a.retile_D(tCrA);  // ? (CPY, CPY_M, CPY_K)
+  auto tAsA = s2r_thr_copy_a.partition_S(sA);  // (CPY, CPY_M, CPY_K, kStage)
+  auto tCrA_view = s2r_thr_copy_a.retile_D(tCrA);  // (CPY, CPY_M, CPY_K)
 
   auto s2r_tiled_copy_b = make_tiled_copy_B(S2RCopyAtomB{}, tiled_mma);
   auto s2r_thr_copy_b = s2r_tiled_copy_b.get_slice(idx);
-  auto tBsB = s2r_thr_copy_b.partition_S(sB);  // ? (CPY, CPY_M, CPY_K, kStage)
-  auto tCrB_view = s2r_thr_copy_b.retile_D(tCrB);  // ? (CPY, CPY_M, CPY_K)
+  auto tBsB = s2r_thr_copy_b.partition_S(sB);  // (CPY, CPY_M, CPY_K, kStage)
+  auto tCrB_view = s2r_thr_copy_b.retile_D(tCrB);  // (CPY, CPY_M, CPY_K)
 
   G2SCopyA g2s_tiled_copy_a;
   auto g2s_thr_copy_a = g2s_tiled_copy_a.get_slice(idx);
@@ -182,44 +141,11 @@ cute_gemm_multi_stage_kernel(void *Dptr, const void *Aptr, const void *Bptr, int
   auto tBsB_copy =
       g2s_thr_copy_b.partition_D(sB);  // (CPY, CPY_N, CPY_K, kStage)
 
-  if(thread0()){
-    printf("A :");print(A);printf("\n");
-    printf("B :");print(B);printf("\n");
-    printf("D :");print(D);printf("\n");
-    printf("gA :");print(gA);printf("\n");
-    printf("gB :");print(gB);printf("\n");
-    printf("gD :");print(gD);printf("\n");
-    printf("sA :");print(sA);printf("\n");
-    printf("sB :");print(sB);printf("\n");
-    printf("tiled_mma :");print(tiled_mma);printf("\n");
-    printf("thrmma :");print(thr_mma);printf("\n");
-    printf("tCrA :");print(tCrA);printf("\n");
-    printf("tCrB :");print(tCrB);printf("\n");
-    printf("tCrD :");print(tCrD);printf("\n");
-    printf("s2r_tiled_copy_a:");print(s2r_tiled_copy_a);printf("\n");
-    printf("s2r_thr_copy_a:");  print(s2r_thr_copy_a);printf("\n");
-    printf("tAsA:");            print(tAsA);printf("\n");
-    printf("tCrA_view:");       print(tCrA_view);printf("\n");
-    printf("s2r_tiled_copy_b:");print(s2r_tiled_copy_b);printf("\n");
-    printf("s2r_thr_copy_b:");  print(s2r_thr_copy_b);printf("\n");
-    printf("tBsB:");            print(tBsB);printf("\n");
-    printf("tCrB_view:");       print(tCrB_view);printf("\n");
-    printf("g2s_tiled_copy_a: ");print(g2s_tiled_copy_a);printf("\n");
-    printf("g2s_thr_copy_a: ");  print(g2s_thr_copy_a);printf("\n");
-    printf("tAgA_copy: ");       print(tAgA_copy);printf("\n");
-    printf("tAsA_copy: ");       print(tAsA_copy);printf("\n");
-    printf("g2s_tiled_copy_b: ");print(g2s_tiled_copy_b);printf("\n");
-    printf("g2s_thr_copy_b: ");  print(g2s_thr_copy_b);printf("\n");
-    printf("tBgB_copy: ");       print(tBgB_copy);printf("\n");
-    printf("tBsB_copy: ");       print(tBsB_copy);printf("\n");
-  }
 
   int itile_to_read = 0;
   int ismem_read = 0;
   int ismem_write = 0;
 
-  // submit kStage - 1 tile
-  // gmem -> shm
 #pragma unroll
   for (int istage = 0; istage < kStage - 1; ++istage) {
     cute::copy(g2s_tiled_copy_a, tAgA_copy(_, _, _, istage),
@@ -232,16 +158,13 @@ cute_gemm_multi_stage_kernel(void *Dptr, const void *Aptr, const void *Bptr, int
     ++ismem_write;
   }
 
-  // wait one submitted gmem->smem done
   cp_async_wait<kStage - 2>();
   __syncthreads();
 
   int ik = 0;
-  // smem -> reg
   cute::copy(s2r_tiled_copy_a, tAsA(_, _, ik, ismem_read), tCrA_view(_, _, ik));
   cute::copy(s2r_tiled_copy_b, tBsB(_, _, ik, ismem_read), tCrB_view(_, _, ik));
 
-  // loop over k: i. load tile, ii. mma
   int ntile = k / kTileK;
 #pragma unroll 1
   for (int itile = 0; itile < ntile; ++itile) {
@@ -279,11 +202,9 @@ cute_gemm_multi_stage_kernel(void *Dptr, const void *Aptr, const void *Bptr, int
       }
 
       cute::gemm(tiled_mma, tCrD, tCrA(_, _, ik), tCrB(_, _, ik), tCrD);
-    }  // for ik
-  }    // itile
+    }
+  }
 
-  // use less shared memory as a scratchpad tile to use large wide instuction
-  // Dreg -> shm -> reg -> global
   auto sC = make_tensor(sA(_, _, ismem_read).data(), SmemLayoutC{});
 
   auto r2s_tiled_copy_c = make_tiled_copy_C(R2SCopyAtomC{}, tiled_mma);
@@ -305,8 +226,6 @@ cute_gemm_multi_stage_kernel(void *Dptr, const void *Aptr, const void *Bptr, int
     // reg -> shm
 #pragma unroll
     for (int j = 0; j < step; ++j) {
-      // we add a temp tensor to cope with accumulator and output data type
-      // difference
       auto t = make_tensor_like<half>(tCrC_r2sx(_, i + j));
       cute::copy(tCrC_r2sx(_, i + j), t);
 
@@ -315,7 +234,6 @@ cute_gemm_multi_stage_kernel(void *Dptr, const void *Aptr, const void *Bptr, int
     __syncthreads();
 
 #pragma unroll
-    // shm -> global
     for (int j = 0; j < step; ++j) {
       cute::copy(s2g_tiled_copy_c, tCsC_s2g(_, 0, 0, j), tCgC_s2gx(_, i + j));
     }
@@ -325,23 +243,19 @@ cute_gemm_multi_stage_kernel(void *Dptr, const void *Aptr, const void *Bptr, int
 }
 
 torch::Tensor cute_gemm_multi_stage(torch::Tensor A, torch::Tensor B){
+  using namespace gemm_config;
   const int M = A.size(0);const int N = B.size(0);const int K = A.size(1);
   torch::Tensor C = torch::empty({M, N}, torch::dtype(torch::kHalf).device(torch::kCUDA));
 
-  using namespace gemm_config;
   dim3 block = kThreadNum;
-  dim3 grid((N + kTileN - 1) / kTileN,
-            (M + kTileM - 1) / kTileM);
-
+  dim3 grid(N / kTileN, M / kTileM);
   int shm_size = kShmSize;
-  cudaFuncSetAttribute(cute_gemm_multi_stage_kernel,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+  cudaFuncSetAttribute(cute_gemm_multi_stage_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cute_gemm_multi_stage_kernel<<<grid, block, shm_size>>>(
     C.data_ptr(),
     A.data_ptr(),
     B.data_ptr(),
     M, N, K);
-
   return C;
 }
 
