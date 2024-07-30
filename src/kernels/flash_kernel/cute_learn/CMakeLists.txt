@@ -88,3 +88,13 @@ cc_binary(
     torch
     cutlass
 )
+
+cc_binary(
+  NAME
+    test_tile_to_shape
+  SRCS
+    test_tile_to_shape.cu
+  DEPS
+    torch
+    cutlass
+)
