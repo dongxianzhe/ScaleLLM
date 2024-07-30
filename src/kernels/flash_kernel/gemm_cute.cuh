@@ -556,7 +556,7 @@ __global__ void cute_gemm_multi_stage_kernel(void *Dptr, const void *Aptr, const
 
   Tensor gA = local_tile(A, make_tile(Int<kTileM>{}, Int<kTileK>{}), make_coord(iy, _));  // (kTileM, kTileK, k) = (128, 32, 8)
   Tensor gB = local_tile(B, make_tile(Int<kTileN>{}, Int<kTileK>{}), make_coord(ix, _));  // (kTileN, kTileK, k) = (128, 32, 8)
-  Tensor gD = local_tile(D, make_tile(Int<kTileM>{}, Int<kTileN>{}), make_coord(iy, ix));  // (kTileM, kTileN) = (128, 128, 8)
+  Tensor gD = local_tile(D, make_tile(Int<kTileM>{}, Int<kTileN>{}), make_coord(iy, ix));  // (kTileM, kTileN) = (128, 128)
 
   extern __shared__ half shm_data[];
   half *Ashm = shm_data; half *Bshm = shm_data + cute::cosize(SmemLayoutA{});
