@@ -574,10 +574,10 @@ __global__ void cute_gemm_multi_stage_kernel(void *Dptr, const void *Aptr, const
                                make_layout(make_shape(Int<32>{}, Int<4>{}), make_stride(Int<4>{}, Int<1>{})),
                                make_layout(make_shape(Int<1>{}, Int<8>{})));
   auto g2s_thr_copy_ab = g2s_tiled_copy_ab.get_slice(idx);
-  auto tAgA_copy = g2s_thr_copy_ab.partition_S(gA);  // (CPY, CPY_M, CPY_K, k)      = (8, 4, 1, 8) = (8, 128 / 32, 32 / 32, 8)
+  auto tAgA_copy = g2s_thr_copy_ab.partition_S(gA);  // (CPY, CPY_M, CPY_K, k)      = (8, 4, 1, 8) = (8, 128 / 32, 32 / 32, 256 / 32)
   auto tAsA_copy = g2s_thr_copy_ab.partition_D(sA);  // (CPY, CPY_M, CPY_K, kStage) = (8, 4, 1, 3) = (8, 128 / 32, 32 / 32, 3)
-  auto tBgB_copy = g2s_thr_copy_ab.partition_S(gB);  // (CPY, CPY_N, CPY_K, k)      = (8, 4, 1, 8) = (8, 128 / 32, 32 / 32, 8)
-  auto tBsB_copy = g2s_thr_copy_ab.partition_D(sB);  // (CPY, CPY_N, CPY_K, kStage) = (8, 4, 1, 3) = (9, 128 / 32, 32 / 32, 3)
+  auto tBgB_copy = g2s_thr_copy_ab.partition_S(gB);  // (CPY, CPY_N, CPY_K, k)      = (8, 4, 1, 8) = (8, 128 / 32, 32 / 32, 256 / 32)
+  auto tBsB_copy = g2s_thr_copy_ab.partition_D(sB);  // (CPY, CPY_N, CPY_K, kStage) = (8, 4, 1, 3) = (8, 128 / 32, 32 / 32, 3)
 
   auto s2r_tiled_copy_a = make_tiled_copy_A(Copy_Atom<SM75_U32x4_LDSM_N, half>{}, tiled_mma);
   auto s2r_thr_copy_a = s2r_tiled_copy_a.get_slice(idx);
@@ -659,7 +659,7 @@ __global__ void cute_gemm_multi_stage_kernel(void *Dptr, const void *Aptr, const
 
   int step = size<3>(tCsC_r2s); // 2
 #pragma unroll
-  for (int i = 0; i < size<1>(tCrC_r2sx); i += step) { // 16 each time copy 2 * 8
+  for (int i = 0; i < size<1>(tCrC_r2sx); i += step) { // i = 0, 2, 4, 6, ... , 14
     // reg->smem
 #pragma unroll
     for (int j = 0; j < step; ++j) { // 2 

@@ -90,3 +90,59 @@ cc_binary(
   SRCS
     initializer.cpp
 )
+
+cc_binary(
+  NAME
+    test_cpp
+  SRCS
+    test_cpp.cpp
+)
+
+cc_binary(
+  NAME
+    mycute
+  SRCS
+    mycute.cpp
+)
+
+cc_binary(
+  NAME
+    template7
+  SRCS
+    template7.cpp
+)
+
+cc_binary(
+  NAME
+    template8
+  SRCS
+    template8.cpp
+)
+
+cc_binary(
+  NAME
+    ref_colapse
+  SRCS
+    ref_colapse.cpp
+)
+
+cc_binary(
+  NAME
+    ref_colapse2
+  SRCS
+    ref_colapse2.cpp
+)
+
+cc_binary(
+  NAME
+    ref_colapse3
+  SRCS
+    ref_colapse3.cpp
+)
+
+cc_binary(
+  NAME
+    tuple2
+  SRCS
+    tuple2.cpp
+)

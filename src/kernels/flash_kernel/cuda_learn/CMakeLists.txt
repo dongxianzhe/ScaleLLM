@@ -10,3 +10,10 @@ cc_binary(
   DEPS
     torch
 )
+
+cc_binary(
+  NAME
+    test_shmem
+  SRCS
+    test_shmem.cu
+)
