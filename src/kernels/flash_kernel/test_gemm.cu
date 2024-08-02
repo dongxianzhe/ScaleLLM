@@ -1,6 +1,7 @@
 #include"sgemm.cuh"
 #include<torch/torch.h>
 #include"gemm_cute.cuh"
+#include"attention/tiled_gemm.cuh"
 
 void test(torch::Tensor a, torch::Tensor b, std::string name){
     if (a.is_cuda())a = a.to(torch::kCPU);
@@ -38,6 +39,7 @@ int main(int argc, char* argv[]) {
     auto C8 = cute_mma_gemm_simple(A_half, B_half);
     auto C9 = cute_gemm_multi_stage(A_half, B_half.transpose(0, 1).contiguous());
     auto C10 = cute_gemm_multi_stage_demo(A_half, B_half);
+    auto C11 = tiled_gemm(A_half, B_half.transpose(0, 1).contiguous());
 
     auto C_ref = torch::matmul(A, B);
     auto C_ref_half = torch::matmul(A_half, B_half);
@@ -52,6 +54,7 @@ int main(int argc, char* argv[]) {
     test(C_ref_half, C8, "cute_mma_gemm_simple");
     test(C_ref_half, C9, "cute_gemm_multi_stage");
     test(C_ref_half, C10, "cute_gemm_multi_stage_demo");
+    test(C_ref_half, C11, "tiled_gemm");
 
     return 0;
 }
