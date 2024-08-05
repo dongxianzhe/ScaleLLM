@@ -40,11 +40,17 @@ namespace tiled_gemm_128_128_32_config {
       make_shape(Int<kMmaPM>{}, Int<kMmaPN>{}, Int<kSmemLayoutCBatch>{})));
 }
 
+template<class TensorgA, class TensorgB>
+__device__ void tiled_gemm_128_128_32(TensorgA gA, TensorgB gB, half* shm_data){
+
+}
+
 __global__ void tiled_gemm_kernel(void *Dptr, const void *Aptr, const void *Bptr, int m, int n, int k) {
   using namespace cute;using namespace tiled_gemm_128_128_32_config;
   int idx = threadIdx.x; int ix = blockIdx.x; int iy = blockIdx.y;
 
   Tensor A = make_tensor(make_gmem_ptr((half *)Aptr), make_shape(m, k), make_stride(k, Int<1>{}));  // (M, K) = (1024, 256)
+  // Tensor A = make_tensor(make_gmem_ptr((half *)Aptr), make_shape(m, k), make_stride(Int<1>{}, m));  // (M, K) = (1024, 256)
   Tensor B = make_tensor(make_gmem_ptr((half *)Bptr), make_shape(n, k), make_stride(k, Int<1>{}));  // (N, K) = (1024, 256)
   Tensor D = make_tensor(make_gmem_ptr((half *)Dptr), make_shape(m, n), make_stride(n, Int<1>{}));  // (M, N) = (1024, 1024)
 
@@ -54,6 +60,7 @@ __global__ void tiled_gemm_kernel(void *Dptr, const void *Aptr, const void *Bptr
 
   extern __shared__ half shm_data[];
   half *Ashm = shm_data; half *Bshm = shm_data + cute::cosize(SmemLayoutA{});
+
   auto sA = make_tensor(make_smem_ptr(Ashm), SmemLayoutA{});  // (kTileM, kTileK, kStage) = (128, 32, 3)
   auto sB = make_tensor(make_smem_ptr(Bshm), SmemLayoutB{});  // (kTileN, kTileK, kStage) = (128, 32, 3)
 
@@ -61,6 +68,9 @@ __global__ void tiled_gemm_kernel(void *Dptr, const void *Aptr, const void *Bptr
   auto thr_mma = tiled_mma.get_slice(idx);
   auto tCrA = thr_mma.partition_fragment_A(gA(_, _, 0));  // (MMA, MMA_M, MMA_K) = (8, 4, 2) = (8, 128 / 32, 32 / 16)
   auto tCrB = thr_mma.partition_fragment_B(gB(_, _, 0));  // (MMA, MMA_N, MMA_K) = (4, 8, 2) = (4, 128 / 16, 32 / 16)
+
+  // Tensor D_virtual = make_tensor(make_gmem_ptr((half*)0), make_shape(m, n), make_stride(n, Int<1>{}));  // (M, N) = (1024, 1024)
+  // Tensor gD_virtual = local_tile(D_virtual, make_tile(Int<kTileM>{}, Int<kTileN>{}), make_coord(iy, ix));  // (kTileM, kTileN) = (128, 128)
   auto tCrD = thr_mma.partition_fragment_C(gD);                 // (MMA, MMA_M, MMA_N) = (4, 4, 8) = (4, 128 / 32, 128 / 16)
   clear(tCrD);
 
@@ -134,8 +144,9 @@ __global__ void tiled_gemm_kernel(void *Dptr, const void *Aptr, const void *Bptr
     }
   }
 
-  auto sC = make_tensor(sA(_, _, ismem_read).data(), SmemLayoutC{});
-  auto r2s_tiled_copy_c = make_tiled_copy_C(Copy_Atom<UniversalCopy<int>, half>{}, tiled_mma);
+  // auto sC = make_tensor(sA(_, _, ismem_read).data(), SmemLayoutC{});
+  auto sC = make_tensor(make_smem_ptr(shm_data), SmemLayoutC{});
+  auto r2s_tiled_copy_c = make_tiled_copy_C(Copy_Atom<UniversalCopy<int>, half>{}, tiled_mma); // 只能用int是因为寄存器中没有8个half是连续的。
   auto r2s_thr_copy_c = r2s_tiled_copy_c.get_slice(idx);
   auto tCrC_r2s = r2s_thr_copy_c.retile_S(tCrD);   // (CPY, CPY_M, CPY_N) = (8, 4, 4) // (8, 128 / 32, 128 / 32)
   auto tCsC_r2s = r2s_thr_copy_c.partition_D(sC);  // (CPY, _1, _1, pipe) = (8, 1, 1, 2)
@@ -180,6 +191,6 @@ torch::Tensor tiled_gemm(torch::Tensor A, torch::Tensor B){
     constexpr int shm_size_AB = cute::cosize(SmemLayoutA{}) + cute::cosize(SmemLayoutB{});
     constexpr int shm_size_C = cute::cosize(SmemLayoutC{});
     constexpr int kShmSize = cute::max(shm_size_AB, shm_size_C) * sizeof(half);
-    tiled_gemm_kernel<<<grid, block, kShmSize>>>(C.data_ptr(), A.data_ptr(), B.data_ptr(),M, N, K);
+    tiled_gemm_kernel<<<grid, block, 48 * 1024>>>(C.data_ptr(), A.data_ptr(), B.data_ptr(),M, N, K);
     return C;
 }
