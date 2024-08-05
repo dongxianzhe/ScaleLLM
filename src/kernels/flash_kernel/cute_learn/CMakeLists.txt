@@ -98,3 +98,22 @@ cc_binary(
     torch
     cutlass
 )
+
+cc_binary(
+  NAME
+    test_mma_inc
+  SRCS
+    test_mma_inc.cu
+  DEPS
+    torch
+    cutlass
+)
+
+cc_binary(
+  NAME
+    test_print_latex
+  SRCS
+    test_print_latex.cu
+  DEPS
+    cutlass
+)
