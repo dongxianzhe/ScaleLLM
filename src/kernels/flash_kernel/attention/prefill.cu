@@ -4,6 +4,17 @@
 #include<cute/stride.hpp>
 #include<cute/tensor.hpp>
 
+void test(torch::Tensor a, torch::Tensor b, std::string name){
+    if (a.is_cuda())a = a.to(torch::kCPU);
+    if (b.is_cuda())b = b.to(torch::kCPU);
+    float eps = 1e-1;
+    if (a.allclose(b, eps, eps)) {
+        std::cout << name << ": pass" << std::endl;
+    } else {
+        std::cout << name << ": fail" << std::endl;
+    }
+}
+
 namespace prefill_kernel_config{
     using namespace cute;
 
@@ -123,7 +134,7 @@ __global__ void prefill_kernel(half* Qptr, half* Kptr, half* Vptr, half* Sptr, i
     }
 }
 
-torch::Tensor prefill(torch::Tensor Q, torch::Tensor K, torch::Tensor V){
+void prefill(torch::Tensor Q, torch::Tensor K, torch::Tensor V, torch::Tensor& S){
     // Q (seq_len, head_dim) head_dim major
     // K (seq_len, head_dim) head_dim major
     // V (seq_len, head_dim) head_dim major
@@ -133,7 +144,6 @@ torch::Tensor prefill(torch::Tensor Q, torch::Tensor K, torch::Tensor V){
     // 2. each 4 warp cope with 128 seq length query
     dim3 griddim(seq_len / 128);
     dim3 blockdim(128);
-    auto S = torch::zeros({seq_len, seq_len}, torch::dtype(torch::kHalf).device(torch::kCUDA));
     prefill_kernel<<<griddim, blockdim, 49152>>>(
         static_cast<half*>(Q.data_ptr()),
         static_cast<half*>(K.data_ptr()),
@@ -141,10 +151,23 @@ torch::Tensor prefill(torch::Tensor Q, torch::Tensor K, torch::Tensor V){
         static_cast<half*>(S.data_ptr()),
         seq_len, head_dim
     );
-    return S;
 }
 
 int main(){
-    printf("hello world\n");
+    int seq_len = 1024;
+    int head_dim = 256;
+    auto Q = torch::ones({seq_len, head_dim}, torch::dtype(torch::kHalf).device(torch::kCUDA));
+    auto K = torch::ones({seq_len, head_dim}, torch::dtype(torch::kHalf).device(torch::kCUDA));
+    auto V = torch::ones({seq_len, head_dim}, torch::dtype(torch::kHalf).device(torch::kCUDA));
+    auto S = torch::zeros({seq_len, seq_len }, torch::dtype(torch::kHalf).device(torch::kCUDA));
+    prefill(Q, K, V, S);
+
+    auto S_ref = torch::matmul(Q, K.transpose(0, 1)).slice(1, 0, 128);
+    test(S_ref, S.slice(1, 0, 128), "S test");
+    puts("-------------- S ----------------");
+    std::cout << S.slice(0, 0, 4).slice(1, 0, 4) << std::endl;
+    puts("-------------- S ref ----------------");
+    std::cout << S_ref.slice(0, 0, 4).slice(1, 0, 4) << std::endl;
+
     return 0;
 }

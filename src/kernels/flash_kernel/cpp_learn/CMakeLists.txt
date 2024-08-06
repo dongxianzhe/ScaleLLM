@@ -146,3 +146,12 @@ cc_binary(
   SRCS
     tuple2.cpp
 )
+
+cc_binary(
+  NAME
+    test_ref
+  SRCS
+    test_ref.cpp
+  DEPS
+    torch
+)
