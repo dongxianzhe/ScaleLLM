@@ -1,6 +1,5 @@
 #include<iostream>
 #include<torch/torch.h>
-#include"prefill.cuh"
 
 void test(torch::Tensor a, torch::Tensor b, std::string name){
     if (a.is_cuda())a = a.to(torch::kCPU);

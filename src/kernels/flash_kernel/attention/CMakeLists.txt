@@ -9,3 +9,13 @@ cc_binary(
     torch
     cutlass
 )
+
+cc_binary(
+  NAME
+    prefill
+  SRCS
+    prefill.cu
+  DEPS
+    torch
+    cutlass
+)
