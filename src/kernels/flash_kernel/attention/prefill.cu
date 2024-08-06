@@ -34,14 +34,16 @@ __global__ void prefill_kernel(half* Qptr, half* Kptr, half* Vptr, half* Sptr, i
     Tensor Q = make_tensor(make_gmem_ptr(Qptr), make_shape(seq_len, head_dim), make_stride(seq_len, Int<1>{}));
     Tensor K = make_tensor(make_gmem_ptr(Kptr), make_shape(seq_len, head_dim), make_stride(seq_len, Int<1>{}));
     Tensor V = make_tensor(make_gmem_ptr(Vptr), make_shape(seq_len, head_dim), make_stride(seq_len, Int<1>{}));
+    Tensor S = make_tensor(make_gmem_ptr(Sptr), make_shape(seq_len, seq_len ), make_stride(seq_len, Int<1>{}));
 
     // 2. divide q k
     Tensor gQ = local_tile(Q, make_tile(Int<128>{}, Int<32>{}), make_coord(blockIdx.x, _)); // (128, 32, 8)
     Tensor gK = local_tile(K, make_tile(Int<128>{}, Int<32>{}), make_coord(_, _));          // (128, 32, 8, 8) = (128, 32, 1024 / 128, 256 / 32)
+    Tensor gS = local_tile(S, make_tile(Int<128>{}, Int<128>{}), make_coord(blockIdx.x, _));// (128, 128, 8) = (128, 128, 1024 / 128)
 
     // 3. Q K g2s
     Tensor sQ = make_tensor(make_smem_ptr(shm_data), SmemLayoutQ{}); 
-    Tensor sK = make_tensor(make_smem_ptr(shm_data + cute::cosize(SmemLayoutQ{})), SmemLayoutQ{});
+    Tensor sK = make_tensor(make_smem_ptr(shm_data + cute::cosize(SmemLayoutK{})), SmemLayoutK{});
 
     auto g2s_tiled_copy_ab = make_tiled_copy(Copy_Atom<SM80_CP_ASYNC_CACHEGLOBAL<cute::uint128_t>, half>{},
                                 make_layout(make_shape(Int<32>{}, Int<4>{}), make_stride(Int<4>{}, Int<1>{})),
@@ -49,15 +51,41 @@ __global__ void prefill_kernel(half* Qptr, half* Kptr, half* Vptr, half* Sptr, i
     auto g2s_thr_copy_ab = g2s_tiled_copy_ab.get_slice(threadIdx.x);
     auto tAgQ_copy = g2s_thr_copy_ab.partition_S(gQ);  // (CPY, CPY_M, CPY_K, k)      = (8, 4, 1, 8) = (8, 128 / 32, 32 / 32, 256 / 32)
     auto tAsQ_copy = g2s_thr_copy_ab.partition_D(sQ);  // (CPY, CPY_M, CPY_K, kStage) = (8, 4, 1, 3) = (8, 128 / 32, 32 / 32, 3)
-    auto tBgK_copy = g2s_thr_copy_ab.partition_S(gK);  // (CPY, CPY_N, CPY_K, k)      = (8, 4, 1, 8, 8) = (8, 128 / 32, 32 / 32, 1024 / 128, 256 / 32)
+    auto tBgK_copy = g2s_thr_copy_ab.partition_S(gK);  // (CPY, CPY_N, CPY_K, n, k)      = (8, 4, 1, 8, 8) = (8, 128 / 32, 32 / 32, 1024 / 128, 256 / 32)
     auto tBsK_copy = g2s_thr_copy_ab.partition_D(sK);  // (CPY, CPY_N, CPY_K, kStage) = (8, 4, 1, 3) = (8, 128 / 32, 32 / 32, 3)
 
-    // 4. Q K s2r
+    // 4. mma
     MMA tiled_mma;
     auto thr_mma = tiled_mma.get_slice(threadIdx.x);
     auto tCrQ = thr_mma.partition_fragment_A(gQ(_, _, 0));     // (MMA, MMA_M, MMA_K) = (8, 2, 2) = (8, 128 / 64, 32 / 16)
     auto tCrK = thr_mma.partition_fragment_B(gK(_, _, 0, 0));  // (MMA, MMA_N, MMA_K) = (4, 16, 2) = (4, 128 / 8, 32 / 16)
-    // Tensor c = gK(_, _, 0, 0);
+    auto tCrS = thr_mma.partition_fragment_C(gS(_, _, 0));     // (MMA, MMA_M, MMA_N) = (4, 2, 16) = (4, 128 / 64, 128 / 8)
+
+    // 5. Q K s2r
+    auto s2r_tiled_copy_a = make_tiled_copy_A(Copy_Atom<SM75_U32x4_LDSM_N, half>{}, tiled_mma);
+    auto s2r_thr_copy_a = s2r_tiled_copy_a.get_slice(threadIdx.x);
+    auto tAsQ = s2r_thr_copy_a.partition_S(sQ);                   // (CPY, CPY_M, CPY_K, kStage) = (8, 2, 2, 3)
+    auto tCrQ_view = s2r_thr_copy_a.retile_D(tCrQ);               // (CPY, CPY_M, CPY_K)         = (8, 2, 2)
+
+    auto s2r_tiled_copy_b = make_tiled_copy_B(Copy_Atom<SM75_U32x4_LDSM_N, half>{}, tiled_mma);
+    auto s2r_thr_copy_b = s2r_tiled_copy_b.get_slice(threadIdx.x);
+    auto tBsK = s2r_thr_copy_b.partition_S(sK);                   // (CPY, CPY_M, CPY_K, kStage) = (16, 4, 2, 3)
+    auto tCrK_view = s2r_thr_copy_b.retile_D(tCrK);               // (CPY, CPY_M, CPY_K)         = (16, 4, 2)
+
+    // 6. pg2s 2 tile wait 1 tile
+    int itile_to_read = 0;
+    int ismem_read  = 0;  // s->r read  then increase
+    int ismem_write = 0; // g->s write then increase
+    #pragma unroll
+    for (int istage = 0; istage < kStage - 1 /*submit 2 tile*/; ++istage) { // 
+        cute::copy(g2s_tiled_copy_ab, tAgQ_copy(_, _, _, istage), tAsQ_copy(_, _, _, istage));
+        cute::copy(g2s_tiled_copy_ab, tBgK_copy(_, _, _, 0, istage), tBsK_copy(_, _, _, istage)); // todo next block
+        cp_async_fence();
+        ++itile_to_read; ++ismem_write;
+    }
+    cp_async_wait<kStage - 2>(); // wait 1 submmited g->s done
+    __syncthreads();
+
 
 }
 
