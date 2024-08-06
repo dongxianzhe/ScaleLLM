@@ -72,11 +72,11 @@ __global__ void prefill_kernel(half* Qptr, half* Kptr, half* Vptr, half* Sptr, i
     auto tBsK = s2r_thr_copy_b.partition_S(sK);                   // (CPY, CPY_M, CPY_K, kStage) = (16, 4, 2, 3)
     auto tCrK_view = s2r_thr_copy_b.retile_D(tCrK);               // (CPY, CPY_M, CPY_K)         = (16, 4, 2)
 
-    // 6. pg2s 2 tile wait 1 tile
+    // 6. pg2s 2 tile wait 1 tile, ps2r 1 tile
     int itile_to_read = 0;
     int ismem_read  = 0;  // s->r read  then increase
     int ismem_write = 0; // g->s write then increase
-    #pragma unroll
+#pragma unroll
     for (int istage = 0; istage < kStage - 1 /*submit 2 tile*/; ++istage) { // 
         cute::copy(g2s_tiled_copy_ab, tAgQ_copy(_, _, _, istage), tAsQ_copy(_, _, _, istage));
         cute::copy(g2s_tiled_copy_ab, tBgK_copy(_, _, _, 0, istage), tBsK_copy(_, _, _, istage)); // todo next block
@@ -86,7 +86,41 @@ __global__ void prefill_kernel(half* Qptr, half* Kptr, half* Vptr, half* Sptr, i
     cp_async_wait<kStage - 2>(); // wait 1 submmited g->s done
     __syncthreads();
 
+    int ik = 0; // prefetch first k tile
+    cute::copy(s2r_tiled_copy_a, tAsQ(_, _, ik, ismem_read), tCrQ_view(_, _, ik));
+    cute::copy(s2r_tiled_copy_b, tBsK(_, _, ik, ismem_read), tCrK_view(_, _, ik));
 
+    // 7. for each q tile and k tile 
+    const int ntile = head_dim / 32;
+#pragma unroll 1
+    for (int itile = 0; itile < ntile; ++itile) {
+        int nk = size<2>(tCrQ); // 32 / 16 = 2
+    #pragma unroll
+        for (int ik = 0; ik < nk; ++ik) { // each time compute one tile of the k block
+            // 7.1 pg2s
+            if (ik == nk - 1) {
+                cp_async_wait<kStage - 2>();
+                __syncthreads();
+                ismem_read = (ismem_read + 1) % kStage;
+            }
+            int ik_next = (ik + 1) % nk;
+            cute::copy(s2r_tiled_copy_a, tAsQ(_, _, ik_next, ismem_read), tCrQ_view(_, _, ik_next));
+            cute::copy(s2r_tiled_copy_b, tBsK(_, _, ik_next, ismem_read), tCrK_view(_, _, ik_next));
+            // 7.2 ps2r
+            if (ik == 0) {
+                if (itile_to_read < ntile) {
+                    cute::copy(g2s_tiled_copy_ab, tAgQ_copy(_, _, _, itile_to_read), tAsQ_copy(_, _, _, ismem_write));
+                    cute::copy(g2s_tiled_copy_ab, tBgK_copy(_, _, _, 0, itile_to_read), tBsK_copy(_, _, _, ismem_write));
+
+                    ++ itile_to_read;
+                    ismem_write = (ismem_write + 1) % kStage;
+                }
+                cp_async_fence();
+            }
+            // 7.3 compute
+            cute::gemm(tiled_mma, tCrS, tCrQ(_, _, ik), tCrK(_, _, ik), tCrS);
+        }
+    }
 }
 
 torch::Tensor prefill(torch::Tensor Q, torch::Tensor K, torch::Tensor V){
