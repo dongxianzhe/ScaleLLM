@@ -144,7 +144,32 @@ __global__ void tiled_gemm_kernel(void *Dptr, const void *Aptr, const void *Bptr
     }
   }
 
-  // auto sC = make_tensor(sA(_, _, ismem_read).data(), SmemLayoutC{});
+  // another copy
+  // auto sC = make_tensor(make_smem_ptr(shm_data), make_layout(make_shape(Int<32>{}, Int<32>{}), make_stride(Int<32>{}, Int<1>{})));
+
+  // auto r2s_tiled_copy_c = make_tiled_copy_C(Copy_Atom<UniversalCopy<int>, half>{}, tiled_mma); // (32, 32)
+  // auto r2s_thr_copy_c = r2s_tiled_copy_c.get_slice(idx);
+  // auto tCrC_r2s = r2s_thr_copy_c.retile_S(tCrD);  // (8, 4, 4)
+  // auto tCsC_r2s = r2s_thr_copy_c.partition_D(sC); // (8, 1, 1)
+
+  // auto s2g_tiled_copy_c = make_tiled_copy(Copy_Atom<UniversalCopy<cute::uint128_t>, half>{},
+  //                              make_layout(make_shape(Int<32>{}, Int<4>{}),
+  //                                          make_stride(Int<4>{}, Int<1>{})),
+  //                              make_layout(make_shape(Int<1>{}, Int<8>{})));
+  // auto s2g_thr_copy_c = s2g_tiled_copy_c.get_thread_slice(idx);
+  // auto tCsC_s2g = s2g_thr_copy_c.partition_S(sC);  // (CPY, _1, _1, pipe) = (8, 1, 1)
+  // auto tCgC_s2g = s2g_thr_copy_c.partition_D(gD);  // (CPY, CPY_M, CPY_N) = (8, 4, 4) = (8, 128 / 32, 128 / 32)
+  // for(int i = 0;i < 4;i ++){
+  //   for(int j = 0;j < 4;j ++){
+  //     copy(r2s_tiled_copy_c, tCrC_r2s(_, i, j), tCsC_r2s(_, 0, 0));
+  //     __syncthreads();
+  //     copy(s2g_tiled_copy_c, tCsC_s2g(_, 0, 0), tCgC_s2g(_, i, j));
+  //     __syncthreads();
+  //   }
+  // }
+
+
+  // demo copy
   auto sC = make_tensor(make_smem_ptr(shm_data), SmemLayoutC{});
   auto r2s_tiled_copy_c = make_tiled_copy_C(Copy_Atom<UniversalCopy<int>, half>{}, tiled_mma); // 只能用int是因为寄存器中没有8个half是连续的。
   auto r2s_thr_copy_c = r2s_tiled_copy_c.get_slice(idx);
