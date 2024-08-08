@@ -117,3 +117,13 @@ cc_binary(
   DEPS
     cutlass
 )
+
+cc_binary(
+  NAME
+    test_ldmatrix
+  SRCS
+    test_ldmatrix.cu
+  DEPS
+    torch
+    cutlass
+)
