@@ -15,48 +15,8 @@ void test(torch::Tensor a, torch::Tensor b, std::string name){
     }
 }
 
-namespace prefill_kernel_config{
-    using namespace cute;
-
-    // using MMA = decltype(make_tiled_mma(
-    //     SM80_16x8x16_F16F16F16F16_TN{},
-    //     make_layout(make_shape(Int<4>{}, Int<1>{}, Int<1>{})), 
-    //     Tile<Int<32>, Int<32>, Int<16>>{}));
-    using MMA = decltype(make_tiled_mma(
-        SM80_16x8x16_F16F16F16F16_TN{},
-        make_layout(make_shape(Int<4>{}, Int<1>{}, Int<1>{})), 
-        Tile<Int<64>, Int<32>, Int<16>>{}));
-
-    using SmemLayoutAtom = decltype(composition(
-        Swizzle<3, 3, 3>{},
-        make_layout(make_shape(Int<8>{}, Int<32>{}),
-                    make_stride(Int<32>{}, Int<1>{}))));
-
-    constexpr int kStage = 3;
-    using SmemLayoutQ = decltype(
-        tile_to_shape(SmemLayoutAtom{},
-                        make_shape(Int<128>{}, Int<32>{}, Int<kStage>{})));
-    using SmemLayoutK = decltype(
-        tile_to_shape(SmemLayoutAtom{},
-                        make_shape(Int<128>{}, Int<32>{}, Int<kStage>{})));
-
-    using SmemLayoutV = decltype(
-        tile_to_shape(SmemLayoutAtom{},
-                        make_shape(Int<128>{}, Int<32>{}, Int<kStage>{})));
-
-
-    constexpr int kSmemLayoutSBatch = 2;
-    using SmemLayoutAtomS = decltype(composition(
-        Swizzle<2, 3, 3>{},
-        make_layout(make_shape(Int<32>{}, Int<32>{}), make_stride(Int<32>{}, Int<1>{}))));
-    using SmemLayoutS = decltype(tile_to_shape(
-        SmemLayoutAtomS{},
-        make_shape(Int<32>{}, Int<32>{}, Int<kSmemLayoutSBatch>{})));
-};
-
 __global__ void prefill_kernel(half* Qptr, half* Kptr, half* Vptr, half* Sptr, half* Optr, int seq_len, int head_dim){
     using namespace cute;
-    using namespace prefill_kernel_config;
     extern __shared__ half shm_data[];
     // 1. make q k v s o tensor
     Tensor Q = make_tensor(make_gmem_ptr(Qptr), make_shape(seq_len, head_dim), make_stride(head_dim, Int<1>{}));
@@ -78,6 +38,17 @@ __global__ void prefill_kernel(half* Qptr, half* Kptr, half* Vptr, half* Sptr, h
     // }
 
     // 3. Q K g2s
+    constexpr int kStage = 3;
+    using SmemLayoutAtom = decltype(composition(
+        Swizzle<3, 3, 3>{},
+        make_layout(make_shape(Int<8>{}, Int<32>{}),
+                    make_stride(Int<32>{}, Int<1>{}))));
+    using SmemLayoutQ = decltype(
+        tile_to_shape(SmemLayoutAtom{},
+                        make_shape(Int<128>{}, Int<32>{}, Int<kStage>{})));
+    using SmemLayoutK = decltype(
+        tile_to_shape(SmemLayoutAtom{},
+                        make_shape(Int<128>{}, Int<32>{}, Int<kStage>{})));
     Tensor sQ = make_tensor(make_smem_ptr(shm_data), SmemLayoutQ{}); 
     Tensor sK = make_tensor(make_smem_ptr(shm_data + cute::cosize(SmemLayoutQ{})), SmemLayoutK{});
 
@@ -98,10 +69,12 @@ __global__ void prefill_kernel(half* Qptr, half* Kptr, half* Vptr, half* Sptr, h
     //     printf("sK_g2s: ");print(sK_g2s);printf("\n"); // ((_8,_1),_4,_1,_3):((_1,_0),_1024,_0,_4096)
     // }
 
-
-
     for(int sid = 0; sid < 1024 / 128; sid ++){ // each time compute one S block
         // 4. mma
+        using MMA = decltype(make_tiled_mma(
+            SM80_16x8x16_F16F16F16F16_TN{},
+            make_layout(make_shape(Int<4>{}, Int<1>{}, Int<1>{})), 
+            Tile<Int<64>, Int<32>, Int<16>>{}));
         MMA tiled_mma;
         auto thr_mma = tiled_mma.get_slice(threadIdx.x);
         auto rQ = thr_mma.partition_fragment_A(gQ(_, _, 0));     // (MMA, MMA_M, MMA_K) = (8, 2, 2) = (8, 128 / 64, 32 / 16)
@@ -197,6 +170,7 @@ __global__ void prefill_kernel(half* Qptr, half* Kptr, half* Vptr, half* Sptr, h
         // 1. make V tensor
         Tensor gV = local_tile(V, make_tile(Int<128>{}, Int<128>{}), make_coord(sid, _));         // (128, 128, 2) = (128, 128, 256 / 128)
         // 1. g2s V O partition
+        using SmemLayoutV = decltype(tile_to_shape(SmemLayoutAtom{}, make_shape(Int<32>{}, Int<128>{}, Int<kStage>{})));
         Tensor sV = make_tensor(make_smem_ptr(shm_data + cute::cosize(SmemLayoutQ{})), SmemLayoutV{});
 
         auto g2sgV = g2s_thr_copy_ab.partition_S(gV);  // (CPY, CPY_S, CPY_H, k)      = (8, 4, 4, 2) = (8, 128 / 32, 32 / 32, 256 / 128)
