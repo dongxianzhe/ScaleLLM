@@ -40,6 +40,10 @@ namespace prefill_kernel_config{
         tile_to_shape(SmemLayoutAtom{},
                         make_shape(Int<128>{}, Int<32>{}, Int<kStage>{})));
 
+    using SmemLayoutV = decltype(
+        tile_to_shape(SmemLayoutAtom{},
+                        make_shape(Int<128>{}, Int<32>{}, Int<kStage>{})));
+
 
     constexpr int kSmemLayoutSBatch = 2;
     using SmemLayoutAtomS = decltype(composition(
@@ -54,16 +58,18 @@ __global__ void prefill_kernel(half* Qptr, half* Kptr, half* Vptr, half* Sptr, h
     using namespace cute;
     using namespace prefill_kernel_config;
     extern __shared__ half shm_data[];
-    // 1. make q k v tensor
+    // 1. make q k v s o tensor
     Tensor Q = make_tensor(make_gmem_ptr(Qptr), make_shape(seq_len, head_dim), make_stride(head_dim, Int<1>{}));
     Tensor K = make_tensor(make_gmem_ptr(Kptr), make_shape(seq_len, head_dim), make_stride(head_dim, Int<1>{}));
     Tensor V = make_tensor(make_gmem_ptr(Vptr), make_shape(seq_len, head_dim), make_stride(head_dim, Int<1>{}));
     Tensor S = make_tensor(make_gmem_ptr(Sptr), make_shape(seq_len, seq_len ), make_stride(seq_len, Int<1>{}));
+    Tensor O = make_tensor(make_gmem_ptr(Optr), make_shape(seq_len, head_dim), make_stride(head_dim, Int<1>{}));
 
     // 2. divide q k
     Tensor gQ = local_tile(Q, make_tile(Int<128>{}, Int<32>{}), make_coord(blockIdx.x, _)); // (128, 32, 8)
     Tensor gK = local_tile(K, make_tile(Int<128>{}, Int<32>{}), make_coord(_, _));          // (128, 32, 8, 8) = (128, 32, 1024 / 128, 256 / 32)
     Tensor gS = local_tile(S, make_tile(Int<128>{}, Int<128>{}), make_coord(blockIdx.x, _));// (128, 128, 8) = (128, 128, 1024 / 128)
+    Tensor gO = local_tile(O, make_tile(Int<128>{}, Int<128>{}), make_coord(blockIdx.x, _));// (128, 128, 8) = (128, 128, 1024 / 128)
 
     // if(thread0()){
     //     printf("gQ: ");print(gQ);printf("\n"); // (_128,_32,8):(256,_1,_32)
@@ -188,6 +194,16 @@ __global__ void prefill_kernel(half* Qptr, half* Kptr, half* Vptr, half* Sptr, h
         cp_async_wait<0>();
         __syncthreads();
 
+        // 1. make V tensor
+        Tensor gV = local_tile(V, make_tile(Int<128>{}, Int<128>{}), make_coord(sid, _));         // (128, 128, 2) = (128, 128, 256 / 128)
+        // 1. g2s V O partition
+        Tensor sV = make_tensor(make_smem_ptr(shm_data + cute::cosize(SmemLayoutQ{})), SmemLayoutV{});
+
+        auto g2sgV = g2s_thr_copy_ab.partition_S(gV);  // (CPY, CPY_S, CPY_H, k)      = (8, 4, 4, 2) = (8, 128 / 32, 32 / 32, 256 / 128)
+        auto g2ssV = g2s_thr_copy_ab.partition_D(sV);  // (CPY, CPY_S, CPY_H, kStage) = (8, 4, 1, 3) = (8, 128 / 32, 32 / 32, 3)
+
+        // 2. s2r V O partition
+        // 3. compute
     }
 }
 
