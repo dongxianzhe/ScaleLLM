@@ -85,17 +85,17 @@ __global__ void prefill_kernel(half* Qptr, half* Kptr, half* Vptr, half* Sptr, h
                                 make_layout(make_shape(Int<32>{}, Int<4>{}), make_stride(Int<4>{}, Int<1>{})),
                                 make_layout(make_shape(Int<1>{}, Int<8>{})));
     auto g2s_thr_copy_ab = g2s_tiled_copy_ab.get_slice(threadIdx.x);
-    auto g2sgQ = g2s_thr_copy_ab.partition_S(gQ);  // (CPY, CPY_M, CPY_K, k)      = (8, 4, 1, 8) = (8, 128 / 32, 32 / 32, 256 / 32)
-    auto g2ssQ = g2s_thr_copy_ab.partition_D(sQ);  // (CPY, CPY_M, CPY_K, kStage) = (8, 4, 1, 3) = (8, 128 / 32, 32 / 32, 3)
-    auto g2sgK = g2s_thr_copy_ab.partition_S(gK);  // (CPY, CPY_N, CPY_K, n, k)      = (8, 4, 1, 8, 8) = (8, 128 / 32, 32 / 32, 1024 / 128, 256 / 32)
-    auto g2ssK = g2s_thr_copy_ab.partition_D(sK);  // (CPY, CPY_N, CPY_K, kStage) = (8, 4, 1, 3) = (8, 128 / 32, 32 / 32, 3)
+    auto gQ_g2s = g2s_thr_copy_ab.partition_S(gQ);  // (CPY, CPY_M, CPY_K, k)      = (8, 4, 1, 8) = (8, 128 / 32, 32 / 32, 256 / 32)
+    auto sQ_g2s = g2s_thr_copy_ab.partition_D(sQ);  // (CPY, CPY_M, CPY_K, kStage) = (8, 4, 1, 3) = (8, 128 / 32, 32 / 32, 3)
+    auto gK_g2s = g2s_thr_copy_ab.partition_S(gK);  // (CPY, CPY_N, CPY_K, n, k)      = (8, 4, 1, 8, 8) = (8, 128 / 32, 32 / 32, 1024 / 128, 256 / 32)
+    auto sK_g2s = g2s_thr_copy_ab.partition_D(sK);  // (CPY, CPY_N, CPY_K, kStage) = (8, 4, 1, 3) = (8, 128 / 32, 32 / 32, 3)
     // if(thread0()){
     //     printf("sQ: ");print(sQ);printf("\n"); // Sw<3,3,3> o _0 o (_128,_32,_3):(_32,_1,_4096)
     //     printf("sK: ");print(sK);printf("\n"); // Sw<3,3,3> o _0 o (_128,_32,_3):(_32,_1,_4096)
-    //     printf("g2sgQ: ");print(g2sgQ);printf("\n"); // ((_8,_1),_4,_1,8):((_1,_0),8192,_0,_32)
-    //     printf("g2ssQ: ");print(g2ssQ);printf("\n"); // ((_8,_1),_4,_1,_3):((_1,_0),_1024,_0,_4096)
-    //     printf("g2sgK: ");print(g2sgK);printf("\n"); // ((_8,_1),_4,_1,8,8):((_1,_0),8192,_0,32768,_32)
-    //     printf("g2ssK: ");print(g2ssK);printf("\n"); // ((_8,_1),_4,_1,_3):((_1,_0),_1024,_0,_4096)
+    //     printf("gQ_g2s: ");print(gQ_g2s);printf("\n"); // ((_8,_1),_4,_1,8):((_1,_0),8192,_0,_32)
+    //     printf("sQ_g2s: ");print(sQ_g2s);printf("\n"); // ((_8,_1),_4,_1,_3):((_1,_0),_1024,_0,_4096)
+    //     printf("gK_g2s: ");print(gK_g2s);printf("\n"); // ((_8,_1),_4,_1,8,8):((_1,_0),8192,_0,32768,_32)
+    //     printf("sK_g2s: ");print(sK_g2s);printf("\n"); // ((_8,_1),_4,_1,_3):((_1,_0),_1024,_0,_4096)
     // }
 
 
@@ -111,13 +111,13 @@ __global__ void prefill_kernel(half* Qptr, half* Kptr, half* Vptr, half* Sptr, h
         // 5. Q K s2r
         auto s2r_tiled_copy_a = make_tiled_copy_A(Copy_Atom<SM75_U32x4_LDSM_N, half>{}, tiled_mma);
         auto s2r_thr_copy_a = s2r_tiled_copy_a.get_slice(threadIdx.x);
-        auto s2rsQ = s2r_thr_copy_a.partition_S(sQ);                   // (CPY, CPY_M, CPY_K, kStage) = (8, 2, 2, 3)
-        auto s2rrQ = s2r_thr_copy_a.retile_D(rQ);               // (CPY, CPY_M, CPY_K)         = (8, 2, 2)
+        auto sQ_s2r = s2r_thr_copy_a.partition_S(sQ);                   // (CPY, CPY_M, CPY_K, kStage) = (8, 2, 2, 3)
+        auto rQ_s2r = s2r_thr_copy_a.retile_D(rQ);               // (CPY, CPY_M, CPY_K)         = (8, 2, 2)
 
         auto s2r_tiled_copy_b = make_tiled_copy_B(Copy_Atom<SM75_U32x4_LDSM_N, half>{}, tiled_mma);
         auto s2r_thr_copy_b = s2r_tiled_copy_b.get_slice(threadIdx.x);
-        auto s2rsK = s2r_thr_copy_b.partition_S(sK);                   // (CPY, CPY_M, CPY_K, kStage) = (16, 4, 2, 3)
-        auto s2rrK = s2r_thr_copy_b.retile_D(rK);               // (CPY, CPY_M, CPY_K)         = (16, 4, 2)
+        auto sK_s2r = s2r_thr_copy_b.partition_S(sK);                   // (CPY, CPY_M, CPY_K, kStage) = (16, 4, 2, 3)
+        auto rK_s2r = s2r_thr_copy_b.retile_D(rK);               // (CPY, CPY_M, CPY_K)         = (16, 4, 2)
 
         // 6. pg2s 2 tile wait 1 tile, ps2r 1 tile
         int itile_to_read = 0; 
@@ -125,8 +125,8 @@ __global__ void prefill_kernel(half* Qptr, half* Kptr, half* Vptr, half* Sptr, h
         int ismem_write = 0; // g2s write then increase
     #pragma unroll
         for (int istage = 0; istage < kStage - 1 /*submit 2 tile*/; ++istage) { // 
-            cute::copy(g2s_tiled_copy_ab, g2sgQ(_, _, _, istage), g2ssQ(_, _, _, istage));
-            cute::copy(g2s_tiled_copy_ab, g2sgK(_, _, _, sid, istage), g2ssK(_, _, _, istage)); // todo next block
+            cute::copy(g2s_tiled_copy_ab, gQ_g2s(_, _, _, istage), sQ_g2s(_, _, _, istage));
+            cute::copy(g2s_tiled_copy_ab, gK_g2s(_, _, _, sid, istage), sK_g2s(_, _, _, istage)); // todo next block
             cp_async_fence();
             ++itile_to_read; ++ismem_write;
         }
@@ -134,8 +134,8 @@ __global__ void prefill_kernel(half* Qptr, half* Kptr, half* Vptr, half* Sptr, h
         __syncthreads();
 
         int ik = 0; // prefetch first k tile
-        cute::copy(s2r_tiled_copy_a, s2rsQ(_, _, ik, ismem_read), s2rrQ(_, _, ik));
-        cute::copy(s2r_tiled_copy_b, s2rsK(_, _, ik, ismem_read), s2rrK(_, _, ik));
+        cute::copy(s2r_tiled_copy_a, sQ_s2r(_, _, ik, ismem_read), rQ_s2r(_, _, ik));
+        cute::copy(s2r_tiled_copy_b, sK_s2r(_, _, ik, ismem_read), rK_s2r(_, _, ik));
 
         // 7. for each q tile and k tile 
         const int ntile = head_dim / 32;
@@ -151,13 +151,13 @@ __global__ void prefill_kernel(half* Qptr, half* Kptr, half* Vptr, half* Sptr, h
                     ismem_read = (ismem_read + 1) % kStage;
                 }
                 int ik_next = (ik + 1) % nk;
-                cute::copy(s2r_tiled_copy_a, s2rsQ(_, _, ik_next, ismem_read), s2rrQ(_, _, ik_next));
-                cute::copy(s2r_tiled_copy_b, s2rsK(_, _, ik_next, ismem_read), s2rrK(_, _, ik_next));
+                cute::copy(s2r_tiled_copy_a, sQ_s2r(_, _, ik_next, ismem_read), rQ_s2r(_, _, ik_next));
+                cute::copy(s2r_tiled_copy_b, sK_s2r(_, _, ik_next, ismem_read), rK_s2r(_, _, ik_next));
                 // 7.2 ps2r
                 if (ik == 0) {
                     if (itile_to_read < ntile) {
-                        cute::copy(g2s_tiled_copy_ab, g2sgQ(_, _, _, itile_to_read), g2ssQ(_, _, _, ismem_write));
-                        cute::copy(g2s_tiled_copy_ab, g2sgK(_, _, _, sid, itile_to_read), g2ssK(_, _, _, ismem_write));
+                        cute::copy(g2s_tiled_copy_ab, gQ_g2s(_, _, _, itile_to_read), sQ_g2s(_, _, _, ismem_write));
+                        cute::copy(g2s_tiled_copy_ab, gK_g2s(_, _, _, sid, itile_to_read), sK_g2s(_, _, _, ismem_write));
 
                         ++ itile_to_read;
                         ismem_write = (ismem_write + 1) % kStage;
@@ -172,22 +172,22 @@ __global__ void prefill_kernel(half* Qptr, half* Kptr, half* Vptr, half* Sptr, h
         auto sS = make_tensor(make_smem_ptr(shm_data), make_layout(make_shape(Int<64>{}, Int<32>{}), make_stride(Int<32>{}, Int<1>{})));
         auto r2s_tiled_copy_c = make_tiled_copy_C(Copy_Atom<UniversalCopy<int>, half>{}, tiled_mma); // (64, 32)
         auto r2s_thr_copy_c = r2s_tiled_copy_c.get_slice(threadIdx.x); // CPY = 16
-        auto r2srS = r2s_thr_copy_c.retile_S(rS);   // (CPY, CPY_M, CPY_N) = (16, 2, 4) // (16, 128 / 64, 128 / 32)
-        auto r2ssS = r2s_thr_copy_c.partition_D(sS);  // (CPY, _1, _1) = (16, 1, 1)
+        auto rS_r2s = r2s_thr_copy_c.retile_S(rS);   // (CPY, CPY_M, CPY_N) = (16, 2, 4) // (16, 128 / 64, 128 / 32)
+        auto sS_r2s = r2s_thr_copy_c.partition_D(sS);  // (CPY, _1, _1) = (16, 1, 1)
 
         auto s2g_tiled_copy_c = make_tiled_copy(Copy_Atom<UniversalCopy<cute::uint128_t>, half>{},
                                 make_layout(make_shape(Int<32>{}, Int<4>{}),
                                             make_stride(Int<4>{}, Int<1>{})),
                                 make_layout(make_shape(Int<1>{}, Int<8>{})));
         auto s2g_thr_copy_c = s2g_tiled_copy_c.get_thread_slice(threadIdx.x);
-        auto s2gsS = s2g_thr_copy_c.partition_S(sS);  // (CPY, CPY_M, CPY_N) = (8, 2, 1)
-        auto s2ggS = s2g_thr_copy_c.partition_D(gS);  // (CPY, CPY_M, CPY_N) = (8, 4, 4, 8) = (8, 128 / 32, 128 / 32, 1024 / 128)
+        auto sS_s2g = s2g_thr_copy_c.partition_S(sS);  // (CPY, CPY_M, CPY_N) = (8, 2, 1)
+        auto gS_s2g = s2g_thr_copy_c.partition_D(gS);  // (CPY, CPY_M, CPY_N) = (8, 4, 4, 8) = (8, 128 / 32, 128 / 32, 1024 / 128)
         for(int i = 0;i < 2;i ++){
             for(int j = 0;j < 4;j ++){
-                copy(r2s_tiled_copy_c, r2srS(_, i, j), r2ssS(_, 0, 0));
+                copy(r2s_tiled_copy_c, rS_r2s(_, i, j), sS_r2s(_, 0, 0));
                 __syncthreads();
-                copy(s2g_tiled_copy_c, s2gsS(_, 0, j), s2ggS(_, i * 2, j, sid));
-                copy(s2g_tiled_copy_c, s2gsS(_, 1, j), s2ggS(_, i * 2 + 1, j, sid));
+                copy(s2g_tiled_copy_c, sS_s2g(_, 0, j), gS_s2g(_, i * 2, j, sid));
+                copy(s2g_tiled_copy_c, sS_s2g(_, 1, j), gS_s2g(_, i * 2 + 1, j, sid));
                 __syncthreads();
             }
         }
