@@ -14,6 +14,8 @@ void test(torch::Tensor a, torch::Tensor b, std::string name){
         std::cout << name << ": fail" << std::endl;
     }
 }
+
+
 __global__ void kernel(half* Qptr, half* Kptr, half* Vptr, half* Sptr, half* Optr){
     using namespace cute;
     auto gQ = make_tensor(make_gmem_ptr(Qptr), make_layout(make_shape(Int<16>{}, Int<16>{}), make_stride(Int<16>{}, Int<1>{})));
