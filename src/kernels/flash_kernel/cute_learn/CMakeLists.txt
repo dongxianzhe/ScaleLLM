@@ -137,3 +137,13 @@ cc_binary(
     torch
     cutlass
 )
+
+cc_binary(
+  NAME
+    gemm_128_128
+  SRCS
+    gemm_128_128.cu
+  DEPS
+    torch
+    cutlass
+)
