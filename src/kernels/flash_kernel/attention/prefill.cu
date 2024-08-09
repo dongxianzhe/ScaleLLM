@@ -15,6 +15,95 @@ void test(torch::Tensor a, torch::Tensor b, std::string name){
     }
 }
 
+template<
+    typename g2s_tiled_copy_a_type, 
+    typename gA_g2s_type, 
+    typename sA_g2s_type, 
+    typename s2r_tiled_copy_a_type, 
+    typename sA_s2r_type, 
+    typename rA_s2r_type, 
+    typename g2s_tiled_copy_b_type, 
+    typename gB_g2s_type, 
+    typename sB_g2s_type, 
+    typename s2r_tiled_copy_b_type, 
+    typename sB_s2r_type, 
+    typename rB_s2r_type, 
+    typename tiled_mma_type,
+    typename rA_type, 
+    typename rB_type, 
+    typename rC_type
+>
+__device__ void gemm_M128N128_pipeline(
+    g2s_tiled_copy_a_type& g2s_tiled_copy_a, 
+    gA_g2s_type&           gA_g2s          ,  // (CPY, CPY_M, CPY_K, k)      = (8, 4, 1, 8) = (8, 128 / 32, 32 / 32, 256 / 32)
+    sA_g2s_type&           sA_g2s          ,  // (CPY, CPY_M, CPY_K, kStage) = (8, 4, 1, 3) = (8, 128 / 32, 32 / 32, 3)
+    s2r_tiled_copy_a_type& s2r_tiled_copy_a, 
+    sA_s2r_type&           sA_s2r          ,  // (CPY, CPY_M, CPY_K, kStage) = (8, 2, 2, 3)
+    rA_s2r_type&           rA_s2r          ,  // (CPY, CPY_M, CPY_K)         = (8, 2, 2)
+    g2s_tiled_copy_b_type& g2s_tiled_copy_b,
+    gB_g2s_type&           gB_g2s          ,  // (CPY, CPY_N, CPY_K, k)      = (8, 4, 1, 8) = (8, 128 / 32, 32 / 32, 1024 / 128, 256 / 32)
+    sB_g2s_type&           sB_g2s          ,  // (CPY, CPY_N, CPY_K, kStage) = (8, 4, 1, 3) = (8, 128 / 32, 32 / 32, 3)
+    s2r_tiled_copy_b_type& s2r_tiled_copy_b, 
+    sB_s2r_type&           sB_s2r          ,  // (CPY, CPY_M, CPY_K, kStage) = (16, 4, 2, 3)
+    rB_s2r_type&           rB_s2r          ,  // (CPY, CPY_M, CPY_K)         = (16, 4, 2)
+    tiled_mma_type&        tiled_mma       ,
+    rA_type&               rA              ,  // (MMA, MMA_M, MMA_K)         = (8, 2, 2)  = (8, 128 / 64, 32 / 16)
+    rB_type&               rB              ,  // (MMA, MMA_N, MMA_K)         = (4, 16, 2) = (4, 128 / 8, 32 / 16)
+    rC_type&               rC                 // (MMA, MMA_M, MMA_N)         = (4, 2, 16) = (4, 128 / 64, 128 / 8)
+    ){
+    using namespace cute;
+    constexpr int kStage = 3;
+
+    int itile_to_read = 0; 
+    int ismem_read  = 0;  // s2r read then increase
+    int ismem_write = 0; // g2s write then increase
+#pragma unroll
+    for (int istage = 0; istage < kStage - 1 /*submit 2 tile*/; ++istage) { // 
+        cute::copy(g2s_tiled_copy_a, gA_g2s(_, _, _, istage), sA_g2s(_, _, _, istage));
+        cute::copy(g2s_tiled_copy_b, gB_g2s(_, _, _, istage), sB_g2s(_, _, _, istage)); // todo next block
+        cp_async_fence();
+        ++itile_to_read; ++ismem_write;
+    }
+    cp_async_wait<kStage - 2>(); // wait 1 submmited g->s done
+    __syncthreads();
+
+    int ik = 0; // prefetch first k tile
+    cute::copy(s2r_tiled_copy_a, sA_s2r(_, _, ik, ismem_read), rA_s2r(_, _, ik));
+    cute::copy(s2r_tiled_copy_b, sB_s2r(_, _, ik, ismem_read), rB_s2r(_, _, ik));
+
+    // 7. for each q tile and k tile 
+    const int ntile = size<3>(gA_g2s);
+#pragma unroll 1
+    for (int itile = 0; itile < ntile; ++itile) {
+        int nk = size<2>(rA); // 32 / 16 = 2
+    #pragma unroll
+        for (int ik = 0; ik < nk; ++ik) { // each time compute one tile of the k block
+            // 7.1 pg2s
+            if (ik == nk - 1) {
+                cp_async_wait<kStage - 2>();
+                __syncthreads();
+                ismem_read = (ismem_read + 1) % kStage;
+            }
+            int ik_next = (ik + 1) % nk;
+            cute::copy(s2r_tiled_copy_a, sA_s2r(_, _, ik_next, ismem_read), rA_s2r(_, _, ik_next));
+            cute::copy(s2r_tiled_copy_b, sB_s2r(_, _, ik_next, ismem_read), rB_s2r(_, _, ik_next));
+            // 7.2 ps2r
+            if (ik == 0) {
+                if (itile_to_read < ntile) {
+                    cute::copy(g2s_tiled_copy_a, gA_g2s(_, _, _, itile_to_read), sA_g2s(_, _, _, ismem_write));
+                    cute::copy(g2s_tiled_copy_b, gB_g2s(_, _, _, itile_to_read), sB_g2s(_, _, _, ismem_write));
+
+                    ++ itile_to_read;
+                    ismem_write = (ismem_write + 1) % kStage;
+                }
+                cp_async_fence();
+            }
+            // 7.3 compute
+            cute::gemm(tiled_mma, rC, rA(_, _, ik), rB(_, _, ik), rC);
+        }
+    }
+}
+
 __global__ void prefill_kernel(half* Qptr, half* Kptr, half* Vptr, half* Sptr, half* Optr, int seq_len, int head_dim){
     using namespace cute;
     extern __shared__ half shm_data[];
@@ -90,58 +179,30 @@ __global__ void prefill_kernel(half* Qptr, half* Kptr, half* Vptr, half* Sptr, h
 
         auto s2r_tiled_copy_b = make_tiled_copy_B(Copy_Atom<SM75_U32x4_LDSM_N, half>{}, tiled_mma);
         auto s2r_thr_copy_b = s2r_tiled_copy_b.get_slice(threadIdx.x);
-        auto sK_s2r = s2r_thr_copy_b.partition_S(sK);                   // (CPY, CPY_M, CPY_K, kStage) = (16, 4, 2, 3)
+        auto sK_s2r = s2r_thr_copy_b.partition_S(sK);            // (CPY, CPY_M, CPY_K, kStage) = (16, 4, 2, 3)
         auto rK_s2r = s2r_thr_copy_b.retile_D(rK);               // (CPY, CPY_M, CPY_K)         = (16, 4, 2)
 
+        auto gK_g2s_tile = gK_g2s(_, _, _, sid, _);
         // 6. pg2s 2 tile wait 1 tile, ps2r 1 tile
-        int itile_to_read = 0; 
-        int ismem_read  = 0;  // s2r read then increase
-        int ismem_write = 0; // g2s write then increase
-    #pragma unroll
-        for (int istage = 0; istage < kStage - 1 /*submit 2 tile*/; ++istage) { // 
-            cute::copy(g2s_tiled_copy_ab, gQ_g2s(_, _, _, istage), sQ_g2s(_, _, _, istage));
-            cute::copy(g2s_tiled_copy_ab, gK_g2s(_, _, _, sid, istage), sK_g2s(_, _, _, istage)); // todo next block
-            cp_async_fence();
-            ++itile_to_read; ++ismem_write;
-        }
-        cp_async_wait<kStage - 2>(); // wait 1 submmited g->s done
-        __syncthreads();
+        gemm_M128N128_pipeline(
+            g2s_tiled_copy_ab, 
+            gQ_g2s          ,
+            sQ_g2s          ,
+            s2r_tiled_copy_a,
+            sQ_s2r          ,
+            rQ_s2r          ,
+            g2s_tiled_copy_ab,
+            gK_g2s_tile     ,
+            sK_g2s          ,
+            s2r_tiled_copy_b,
+            sK_s2r          ,
+            rK_s2r          ,
+            tiled_mma       ,
+            rQ              ,
+            rK              ,
+            rS               
+        );
 
-        int ik = 0; // prefetch first k tile
-        cute::copy(s2r_tiled_copy_a, sQ_s2r(_, _, ik, ismem_read), rQ_s2r(_, _, ik));
-        cute::copy(s2r_tiled_copy_b, sK_s2r(_, _, ik, ismem_read), rK_s2r(_, _, ik));
-
-        // 7. for each q tile and k tile 
-        const int ntile = head_dim / 32;
-    #pragma unroll 1
-        for (int itile = 0; itile < ntile; ++itile) {
-            int nk = size<2>(rQ); // 32 / 16 = 2
-        #pragma unroll
-            for (int ik = 0; ik < nk; ++ik) { // each time compute one tile of the k block
-                // 7.1 pg2s
-                if (ik == nk - 1) {
-                    cp_async_wait<kStage - 2>();
-                    __syncthreads();
-                    ismem_read = (ismem_read + 1) % kStage;
-                }
-                int ik_next = (ik + 1) % nk;
-                cute::copy(s2r_tiled_copy_a, sQ_s2r(_, _, ik_next, ismem_read), rQ_s2r(_, _, ik_next));
-                cute::copy(s2r_tiled_copy_b, sK_s2r(_, _, ik_next, ismem_read), rK_s2r(_, _, ik_next));
-                // 7.2 ps2r
-                if (ik == 0) {
-                    if (itile_to_read < ntile) {
-                        cute::copy(g2s_tiled_copy_ab, gQ_g2s(_, _, _, itile_to_read), sQ_g2s(_, _, _, ismem_write));
-                        cute::copy(g2s_tiled_copy_ab, gK_g2s(_, _, _, sid, itile_to_read), sK_g2s(_, _, _, ismem_write));
-
-                        ++ itile_to_read;
-                        ismem_write = (ismem_write + 1) % kStage;
-                    }
-                    cp_async_fence();
-                }
-                // 7.3 compute
-                cute::gemm(tiled_mma, rS, rQ(_, _, ik), rK(_, _, ik), rS);
-            }
-        }
         // [ut] copy S back to test S
         auto sS = make_tensor(make_smem_ptr(shm_data), make_layout(make_shape(Int<64>{}, Int<32>{}), make_stride(Int<32>{}, Int<1>{})));
         auto r2s_tiled_copy_c = make_tiled_copy_C(Copy_Atom<UniversalCopy<int>, half>{}, tiled_mma); // (64, 32)
