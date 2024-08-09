@@ -45,6 +45,9 @@ __global__ void kernel(half* Qptr, half* Kptr, half* Vptr, half* Sptr, half* Opt
                                     make_layout(make_shape(Int<1>{}, Int<1>{}, Int<1>{})), // 这个决定mma的tile
                                     Tile<Int<16>, Int<16>, Int<16>>{}); // 这个决定copy的tile
     auto thr_mma = tiled_mma.get_slice(threadIdx.x);
+    // auto rQ = make_tensor<half>(make_layout(make_shape(_8{}, _1{}, _1{})));
+    // auto rK = make_tensor<half>(make_layout(make_shape(_4{}, _2{}, _1{})));
+    // auto rS = make_tensor<half>(make_layout(make_shape(_4{}, _1{}, _2{})));
     auto rQ = thr_mma.partition_fragment_A(gQ); // (8, 1, 1)
     auto rK = thr_mma.partition_fragment_B(gK); // (4, 2, 1)
     auto rS = thr_mma.partition_fragment_C(gS); // (4, 1, 2)
