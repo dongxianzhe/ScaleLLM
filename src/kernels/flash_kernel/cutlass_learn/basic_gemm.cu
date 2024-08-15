@@ -52,6 +52,9 @@ int main(){
     auto B = torch::randn({N, K}, torch::dtype(torch::kFloat).device(torch::kCUDA)).transpose(0, 1); // (K, N) : (1, K)
     auto C = torch::randn({N, M}, torch::dtype(torch::kFloat).device(torch::kCUDA)).transpose(0, 1); // (M, N) : (1, M)
 
+    // A (M, K) : (1, M) column major
+    // B (N, K) : (K, 1) column major
+    // C (M, N) : (1, M) column major
     int lda = M;
     int ldb = K;
     int ldc = M;

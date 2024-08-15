@@ -5,6 +5,7 @@ cc_library(
     cutlass
   INCLUDES
     cutlass/include
+    cutlass/tools/util/include
   DEPS 
     torch # TODO: depends on CUDA instead of torch
 )

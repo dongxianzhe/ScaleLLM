@@ -2,9 +2,9 @@
 #include<torch/torch.h>
 
 torch::Tensor CutlassSgemmTN(torch::Tensor A, torch::Tensor B){
-    //        A (M, K) : (K, 1)
-    //        B (K, N) : (1, K)
-    // return C (M, N) : (N, 1)
+    //        A (M, K) : (K, 1) row major
+    //        B (N, K) : (K, 1) column major
+    // return C (M, N) : (N, 1) row major
     int M = A.size(0);
     int N = B.size(1);
     int K = A.size(1);
