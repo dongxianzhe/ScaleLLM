@@ -155,3 +155,10 @@ cc_binary(
   DEPS
     torch
 )
+
+cc_binary(
+  NAME
+    test_numeric_limits
+  SRCS
+    test_numeric_limits.cpp
+)
