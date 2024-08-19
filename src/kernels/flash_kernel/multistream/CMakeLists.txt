@@ -40,7 +40,45 @@ cc_binary(
 
 cc_binary(
   NAME
-    multistream_scheduler
+    multistream_scheduler1
   SRCS
-    multistream_scheduler.cu
+    multistream_scheduler1.cu
+  DEPS
+    torch
+    cutlass
+  COPTS
+    -I/usr/local/cuda/extras/CUPTI/include
+    -I/usr/local/cuda/include
+  LINKOPTS
+    -L/usr/local/cuda/extras/CUPTI/lib64
+    -lcupti
+    -L/usr/local/cuda/lib64
+    -lnvidia-ml
+)
+
+cc_binary(
+  NAME
+    test_cupti
+  SRCS
+    test_cupti.cu
+  COPTS
+    -I/usr/local/cuda/extras/CUPTI/include
+  LINKOPTS
+    -L/usr/local/cuda/extras/CUPTI/lib64
+    -lcupti
+)
+
+cc_binary(
+  NAME
+    test_nvml
+  SRCS
+    test_nvml.cu
+  COPTS
+    -I/usr/local/cuda/extras/CUPTI/include
+    -I/usr/local/cuda/include
+  LINKOPTS
+    -L/usr/local/cuda/extras/CUPTI/lib64
+    -lcupti
+    -L/usr/local/cuda/lib64
+    -lnvidia-ml
 )

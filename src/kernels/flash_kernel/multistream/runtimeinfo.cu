@@ -3,34 +3,6 @@
 #include<vector>
 
 int main(){
-    // nvmlInit();
-    // int deviceCount;
-    // cudaGetDeviceCount(&deviceCount);
-
-    // std::vector<nvmlDevice_t> devices(deviceCount);
-    // std::vector<nvmlMemory_t> memInfos(deviceCount);
-
-    // for(int i = 0;i < deviceCount;i ++){
-    //     nvmlDevice_t device;
-    //     nvmlDeviceGetHandleByIndex(i, &device);
-    //     devices[i] = device;
-
-    //     nvmlMemory_t memInfo;
-    //     nvmlDeviceGetMemoryInfo(device, &memInfo);
-    //     memInfos[i] = memInfo;
-    // }
-
-    // for(int i = 0;i < deviceCount;i ++){
-    //     nvmlMemory_t& memInfo = memInfos[i];
-    //     std::cout << "device " << i << "memory info: " << std::endl;
-    //     std::cout << "total memory: " << memInfo.total / 1024 / 1024 << " MB" << std::endl;
-    //     std::cout << "free  memory: " << memInfo.free  / 1024 / 1024 << " MB" << std::endl;
-    //     std::cout << "used  memory: " << memInfo.used  / 1024 / 1024 << " MB" << std::endl;
-    // }
-
-    // nvmlShutdown();
-    // return 0;
-
     int deviceCount;
     cudaGetDeviceCount(&deviceCount);
     std::vector<cudaDeviceProp> deviceProps(deviceCount);
@@ -53,5 +25,31 @@ int main(){
         std::cout << "total memory: " << totalMemory[i] / 1024 / 1024 << " MB" << std::endl;
         std::cout << "free  memory: " << freeMemory[i]  / 1024 / 1024 << " MB" << std::endl;
         std::cout << "used  memory: " << (totalMemory[i] - freeMemory[i]) / 1024 / 1024 << " MB" << std::endl;
+    }
+    // prop
+    std::cout << "---------- prop --------------------" << std::endl;
+    {
+        cudaDeviceProp prop;
+        cudaGetDeviceProperties(&prop, 0);
+        std::cout << "totalGlobalMem:            " << prop.totalGlobalMem / 1024 / 1024 << " GB" << std::endl;
+        std::cout << "sharedMemPerBlock:         " << prop.sharedMemPerBlock << std::endl;
+        std::cout << "regsPerBlock               " << prop.regsPerBlock << std::endl;
+        std::cout << "warpSize                   " << prop.warpSize << std::endl;
+        std::cout << "maxThreadsPerBlock         " << prop.maxThreadsPerBlock << std::endl;
+        std::cout << "multiProcessorCount        " << prop.multiProcessorCount << std::endl;
+        std::cout << "kernelExecTimeoutEnabled   " << prop.kernelExecTimeoutEnabled << std::endl;
+        std::cout << "concurrentKernels          " << prop.concurrentKernels << std::endl;
+        std::cout << "asyncEngineCount           " << prop.asyncEngineCount << std::endl;
+        std::cout << "l2CacheSize                " << prop.l2CacheSize << std::endl;
+        std::cout << "maxThreadsPerMultiProcessor" << prop.maxThreadsPerMultiProcessor << std::endl;
+        std::cout << "streamPrioritiesSupported  " << prop.streamPrioritiesSupported << std::endl;
+        std::cout << "sharedMemPerMultiprocessor " << prop.sharedMemPerMultiprocessor << std::endl;
+        std::cout << "regsPerMultiprocessor      " << prop.regsPerMultiprocessor << std::endl;
+        std::cout << "sharedMemPerBlockOptin     " << prop.sharedMemPerBlockOptin << std::endl;
+        std::cout << "maxBlocksPerMultiProcessor " << prop.maxBlocksPerMultiProcessor << std::endl;
+
+
+
+
     }
 }
