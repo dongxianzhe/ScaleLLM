@@ -171,7 +171,7 @@ int main(){
     for(int i = 0;i < num_kernels;i ++){
         int gpu_id;
         cudaStream_t stream;
-        scheduler.printMemInfo();
+        // scheduler.printMemInfo();
         scheduler.scheduleKernel(false, gpu_id, stream, "GPUUsage");
 
         ts[i] = torch::randn({1024 * 1024 * 256}, torch::dtype(torch::kFloat32).device(torch::kCUDA));
