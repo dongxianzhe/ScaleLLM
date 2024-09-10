@@ -11,3 +11,13 @@ cc_binary(
     torch
     cutlass
 )
+
+cc_binary(
+  NAME
+    test_tensor_copy
+  SRCS
+    test_tensor_copy.cu
+  DEPS
+    torch
+    cutlass
+)

@@ -98,22 +98,22 @@ cc_binary(
     -lnvidia-ml
 )
 
-cc_binary(
-  NAME
-    test_flashinfer_kernels
-  SRCS
-    test_flashinfer_kernels.cu
-  COPTS
-    -I/usr/local/cuda/extras/CUPTI/include
-    -I/usr/local/cuda/include
-  LINKOPTS
-    -L/usr/local/cuda/extras/CUPTI/lib64
-    -lcupti
-    -L/usr/local/cuda/lib64
-    -lnvidia-ml
-  DEPS
-    torch
-    cutlass
-    flash_infer.kernels
-    # flashinfer
-)
+# cc_binary(
+#   NAME
+#     test_flashinfer_kernels
+#   SRCS
+#     test_flashinfer_kernels.cu
+#   COPTS
+#     -I/usr/local/cuda/extras/CUPTI/include
+#     -I/usr/local/cuda/include
+#   LINKOPTS
+#     -L/usr/local/cuda/extras/CUPTI/lib64
+#     -lcupti
+#     -L/usr/local/cuda/lib64
+#     -lnvidia-ml
+#   DEPS
+#     torch
+#     cutlass
+#     flash_infer.kernels
+#     # flashinfer
+# )
