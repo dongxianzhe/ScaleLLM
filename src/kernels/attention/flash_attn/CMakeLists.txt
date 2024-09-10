@@ -1,4 +1,5 @@
 include(cc_library)
+include(cc_binary)
 
 # copy the file to binary dir in order to force re-configuration when the file changes
 configure_file(
@@ -29,3 +30,14 @@ cc_library(
     cutlass
 )
 
+cc_binary(
+  NAME 
+    test_flash_api
+  # HDRS
+  #   flash_api.h
+  SRCS
+    test_flash_api.cpp
+  DEPS
+    torch
+    flash_attn.kernels
+)
