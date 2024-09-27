@@ -12,6 +12,7 @@
 #include <cstdint>
 
 #include "flash_attn_handler.h"
+#include "flash_infer_handler.h"
 #include "gtest/gtest.h"
 #include "models/parameters.h"
 #include "ref_handler.h"
@@ -147,6 +148,16 @@ TEST_P(AttentionPrefillTest, Varlen) {
 
   EXPECT_TRUE(
       torch::allclose(ref_output, output, /*rtol=*/1e-2, /*atol=*/1e-3));
+
+  // flash infer handler
+  FlashInferHandler flash_infer_handler(sm_scale, alibi_slopes);
+
+  torch::Tensor flash_infer_handler_output = torch::empty_like(query);
+  flash_attn_handler.batch_prefill(
+      query, key, value, input_params, sliding_window, output);
+
+  EXPECT_TRUE(
+      torch::allclose(ref_output, flash_infer_handler_output, /*rtol=*/1e-2, /*atol=*/1e-3));
 }
 
 INSTANTIATE_TEST_SUITE_P(
